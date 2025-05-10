@@ -1,4 +1,4 @@
-package com.artemzarubin.weatherml
+package com.artemzarubin.weatherml.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
