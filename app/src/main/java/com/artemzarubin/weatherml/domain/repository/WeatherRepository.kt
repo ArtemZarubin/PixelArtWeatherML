@@ -1,10 +1,9 @@
 package com.artemzarubin.weatherml.domain.repository
 
-// We will define Domain Models later, for now, let's assume ApiService returns DTOs
-// and the repository will handle mapping or pass DTOs further up if needed initially.
 // For a cleaner architecture, repository should return Domain Models.
-import com.artemzarubin.weatherml.data.remote.dto.OneCallResponseDto // Temporary: Using DTO directly
-import com.artemzarubin.weatherml.util.Resource // We will create this utility class later for handling results
+import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
+import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
+import com.artemzarubin.weatherml.util.Resource
 
 interface WeatherRepository {
 
@@ -15,12 +14,28 @@ interface WeatherRepository {
      * @param lat Latitude.
      * @param lon Longitude.
      * @param apiKey The API key for accessing the weather service.
-     * @return A Resource wrapper containing either the OneCallResponseDto on success or an error message.
+     * @return A Resource wrapper containing either the CurrentWeatherResponseDto on success or an error message.
      *         Ideally, this should return a Domain Model, not a DTO.
      */
-    suspend fun getWeather(
+    suspend fun getCurrentWeather(
         lat: Double,
         lon: Double,
         apiKey: String
-    ): Resource<OneCallResponseDto> // TODO: Replace OneCallResponseDto with a Domain Model later
+    ): Resource<CurrentWeatherResponseDto>
+
+    /**
+     * Fetches 5 day / 3 hour forecast data for the given latitude and longitude.
+     *
+     * @param lat Latitude.
+     * @param lon Longitude.
+     * @param apiKey The API key for accessing the weather service.
+     * @return A Resource wrapper containing either the ForecastResponseDto on success or an error message.
+     *         Ideally, this should return Domain Models mapped from DTOs.
+     */
+    suspend fun getForecast( // New method for forecast
+        lat: Double,
+        lon: Double,
+        apiKey: String
+        // count: Int? = null
+    ): Resource<ForecastResponseDto> // Return type is now ForecastResponseDto
 }
