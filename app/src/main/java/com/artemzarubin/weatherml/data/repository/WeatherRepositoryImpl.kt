@@ -1,61 +1,70 @@
 package com.artemzarubin.weatherml.data.repository
 
+// DTO imports are still needed here as ApiService returns DTOs
+import com.artemzarubin.weatherml.data.mapper.mapToWeatherDataBundle
 import com.artemzarubin.weatherml.data.remote.ApiService
-import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
-import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
+import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.Resource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
-import javax.inject.Inject // Hilt annotation for constructor injection
+import javax.inject.Inject
 
-// Hilt will know how to provide ApiService because we configured it in NetworkModule
+// import android.util.Log
+
 class WeatherRepositoryImpl @Inject constructor(
     private val apiService: ApiService
 ) : WeatherRepository {
 
-    override suspend fun getCurrentWeather(
-        lat: Double,
-        lon: Double,
-        apiKey: String
-    ): Resource<CurrentWeatherResponseDto> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val response = apiService.getCurrentWeather(
-                    latitude = lat,
-                    longitude = lon,
-                    apiKey = apiKey
-                )
-                Resource.Success(data = response)
-            } catch (e: Exception) {
-                // Log.e("WeatherRepositoryImpl", "Error fetching current weather: ${e.message}", e)
-                Resource.Error(
-                    message = e.message ?: "An unknown error occurred fetching current weather"
-                )
-            }
-        }
-    }
+    // We are removing the old getCurrentWeather that returned DTOs,
+    // or you can keep it if it's used elsewhere, but the interface now has getAllWeatherData.
 
-    // New implementation for fetching forecast data
-    override suspend fun getForecast(
+    override suspend fun getAllWeatherData(
         lat: Double,
         lon: Double,
         apiKey: String
-        // count: Int? = null // Add if you added it to the interface
-    ): Resource<ForecastResponseDto> {
+    ): Resource<WeatherDataBundle> {
+        // Perform network calls on the IO dispatcher
         return withContext(Dispatchers.IO) {
             try {
-                val response = apiService.getForecast( // Call the new method in ApiService
-                    latitude = lat,
-                    longitude = lon,
-                    apiKey = apiKey
-                    // units, lang, count will use default values from ApiService definition
-                    // or pass 'count' here if you added it to the parameters
+                // Launch both API calls concurrently using async for better performance
+                val currentWeatherDeferred = async {
+                    apiService.getCurrentWeather(
+                        latitude = lat,
+                        longitude = lon,
+                        apiKey = apiKey
+                        // Default units and lang from ApiService
+                    )
+                }
+                val forecastDeferred = async {
+                    apiService.getForecast(
+                        latitude = lat,
+                        longitude = lon,
+                        apiKey = apiKey,
+                        count = 40 // Request full 5-day forecast (8 * 5 = 40 intervals)
+                        // We will then take what we need in the mapper or ViewModel
+                    )
+                }
+
+                // Await for both calls to complete
+                val currentWeatherResponseDto = currentWeatherDeferred.await()
+                val forecastResponseDto = forecastDeferred.await()
+
+                // Map DTOs to Domain Model WeatherDataBundle
+                val weatherDataBundle = mapToWeatherDataBundle(
+                    currentWeatherDto = currentWeatherResponseDto,
+                    forecastResponseDto = forecastResponseDto,
+                    lat = lat, // Pass lat and lon if you want them in WeatherDataBundle
+                    lon = lon
                 )
-                Resource.Success(data = response)
+                Resource.Success(data = weatherDataBundle)
+
             } catch (e: Exception) {
-                // Log.e("WeatherRepositoryImpl", "Error fetching forecast: ${e.message}", e)
-                Resource.Error(message = e.message ?: "An unknown error occurred fetching forecast")
+                // Log.e("WeatherRepositoryImpl", "Error fetching all weather data: ${e.message}", e)
+                Resource.Error(
+                    message = e.message ?: "An unknown error occurred fetching weather data"
+                )
             }
         }
     }

@@ -1,11 +1,11 @@
 package com.artemzarubin.weatherml.ui.mainscreen
 
-import android.util.Log // For logging, if you keep the logs
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.artemzarubin.weatherml.BuildConfig
-import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
-import com.artemzarubin.weatherml.domain.usecase.GetWeatherUseCase
+// BuildConfig is not needed here if the UseCase itself handles the key
+import com.artemzarubin.weatherml.domain.model.WeatherDataBundle // Use the Domain Model
+import com.artemzarubin.weatherml.domain.usecase.GetWeatherDataBundleUseCase // New UseCase
 import com.artemzarubin.weatherml.util.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,63 +16,38 @@ import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val getWeatherUseCase: GetWeatherUseCase
+    private val getWeatherDataBundleUseCase: GetWeatherDataBundleUseCase // Inject a new UseCase
 ) : ViewModel() {
-    private val _currentWeatherState =
-        MutableStateFlow<Resource<CurrentWeatherResponseDto>>(Resource.Loading()) // Type StateFlow
-    val currentWeatherState: StateFlow<Resource<CurrentWeatherResponseDto>> =
-        _currentWeatherState.asStateFlow() // Type StateFlow
+
+    // One StateFlow for all weather data
+    private val _weatherDataState =
+        MutableStateFlow<Resource<WeatherDataBundle>>(Resource.Loading())
+    val weatherDataState: StateFlow<Resource<WeatherDataBundle>> = _weatherDataState.asStateFlow()
 
     /**
-     * Fetches weather data for the given latitude and longitude.
-     * Updates the weatherState StateFlow with the result.
+     * Fetches all weather data (current and forecast) for the given latitude and longitude.
      */
-    fun fetchCurrentWeather(latitude: Double, longitude: Double) {
+    fun fetchAllWeatherData(latitude: Double, longitude: Double) {
         viewModelScope.launch {
-            // Set state to Loading before making the network call
-            _currentWeatherState.value = Resource.Loading()
-            Log.d("MainViewModel", "Fetching weather for lat: $latitude, lon: $longitude")
+            _weatherDataState.value = Resource.Loading()
+            Log.d("MainViewModel", "Fetching all weather data for lat: $latitude, lon: $longitude")
 
-            // The API key is accessed from BuildConfig
-            val apiKey = BuildConfig.OPEN_WEATHER_API_KEY
-            if (apiKey.isBlank()) {
-                Log.e("MainViewModel", "API Key is blank!")
-                _currentWeatherState.value = Resource.Error("API key is missing.")
-                return@launch
-            }
+            val result = getWeatherDataBundleUseCase(lat = latitude, lon = longitude)
+            _weatherDataState.value = result
 
-            // Call the use case
-            val result = getWeatherUseCase(
-                lat = latitude,
-                lon = longitude
-            ) // apiKey is handled by use case now
-
-            // Update the state with the result
-            _currentWeatherState.value = result
-
-            // Log the result for debugging
             when (result) {
                 is Resource.Success -> Log.d(
                     "MainViewModel",
-                    "Weather data fetched successfully: ${result.data}"
+                    "All weather data fetched. City: ${result.data?.currentWeather?.cityName}, Hourly items: ${result.data?.hourlyForecasts?.size}"
                 )
 
                 is Resource.Error -> Log.e(
                     "MainViewModel",
-                    "Error fetching weather data: ${result.message}"
+                    "Error fetching all weather data: ${result.message}"
                 )
 
-                is Resource.Loading -> { /* This case should ideally not be emitted by the use case directly after a call */
-                }
+                is Resource.Loading -> {}
             }
         }
     }
-
-    // Example: Call this function when the ViewModel is created to load initial data
-    // Or, it can be called from the UI when a specific event occurs (e.g., button click, location update)
-    // For now, we will call it from the UI (MainActivity/WeatherScreen) for testing.
-    // init {
-    //     // Example: Zaporizhzhia coordinates
-    //     // fetchWeatherData(47.8388, 35.1396)
-    // }
 }
