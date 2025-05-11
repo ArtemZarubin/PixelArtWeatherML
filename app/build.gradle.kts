@@ -1,4 +1,16 @@
-// Module-level build file: PixelArtWeatherML/app/build.gradle.kts
+// Module-level build file: WeatherML/app/build.gradle.kts
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { fis ->
+            load(fis)
+        }
+    }
+}
+val openWeatherApiKeyFromProperties: String =
+    localProperties.getProperty("OPEN_WEATHER_API_KEY") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -21,6 +33,7 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "OPEN_WEATHER_API_KEY", "\"$openWeatherApiKeyFromProperties\"")
     }
 
     buildTypes {
@@ -40,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
