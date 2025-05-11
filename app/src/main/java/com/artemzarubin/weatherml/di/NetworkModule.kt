@@ -1,6 +1,8 @@
 package com.artemzarubin.weatherml.di
 
 import com.artemzarubin.weatherml.data.remote.ApiService
+import com.artemzarubin.weatherml.data.repository.WeatherRepositoryImpl
+import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -65,5 +67,12 @@ object NetworkModule {
     @Singleton // Ensures a single instance of ApiService is created and reused
     fun provideApiService(retrofit: Retrofit): ApiService {
         return retrofit.create(ApiService::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideWeatherRepository(apiService: ApiService): WeatherRepository {
+        // Hilt will provide ApiService, and we return our implementation
+        return WeatherRepositoryImpl(apiService)
     }
 }
