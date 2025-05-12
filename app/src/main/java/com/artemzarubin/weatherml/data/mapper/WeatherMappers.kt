@@ -1,7 +1,7 @@
+// File: com/artemzarubin/weatherml/data/mapper/WeatherMappers.kt
 package com.artemzarubin.weatherml.data.mapper
 
-// Add these imports for Date, SimpleDateFormat, and Locale
-// Make sure all your DTOs and Domain Models are correctly imported
+import android.util.Log
 import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastItemDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
@@ -17,9 +17,9 @@ import java.util.Locale
 fun CurrentWeatherResponseDto.toDomain(): CurrentWeather {
     val weatherCond = this.weather?.firstOrNull()
     return CurrentWeather(
-        dateTimeMillis = this.dateTime ?: 0L,
-        sunriseMillis = this.sys?.sunrise ?: 0L,
-        sunsetMillis = this.sys?.sunset ?: 0L,
+        dateTimeMillis = (this.dateTime ?: 0L) * 1000L,
+        sunriseMillis = (this.sys?.sunrise ?: 0L) * 1000L,
+        sunsetMillis = (this.sys?.sunset ?: 0L) * 1000L,
         temperatureCelsius = this.main?.temp ?: 0.0,
         feelsLikeCelsius = this.main?.feelsLike ?: 0.0,
         pressureHpa = this.main?.pressure ?: 0,
@@ -39,13 +39,13 @@ fun CurrentWeatherResponseDto.toDomain(): CurrentWeather {
 }
 
 // --- Mappers for Forecast (from /forecast endpoint DTOs) ---
-
 fun ForecastItemDto.toDomainHourly(): HourlyForecast {
     val weatherCond = this.weather?.firstOrNull()
     return HourlyForecast(
-        dateTimeMillis = this.dateTime ?: 0L,
+        dateTimeMillis = (this.dateTime ?: 0L) * 1000L,
         temperatureCelsius = this.main?.temp ?: 0.0,
-        feelsLikeCelsius = this.main?.feelsLike ?: 0.0,
+        feelsLikeCelsius = this.main?.feelsLike
+            ?: 0.0, // Check if 'main' in forecast item has 'feels_like'
         probabilityOfPrecipitation = this.probabilityOfPrecipitation ?: 0.0,
         weatherConditionId = weatherCond?.id ?: 0,
         weatherCondition = weatherCond?.main ?: "Unknown",
@@ -53,60 +53,16 @@ fun ForecastItemDto.toDomainHourly(): HourlyForecast {
         weatherIconId = weatherCond?.icon ?: "",
         windSpeedMps = this.wind?.speed ?: 0.0,
         windDirectionDegrees = this.wind?.deg ?: 0,
-        humidityPercent = this.main?.humidity ?: 0,
-        pressureHpa = this.main?.pressure ?: 0
-    )
-}
-
-// This is a simplified mapper for demonstrating the concept.
-// Real daily forecast aggregation from 3-hourly data would be more complex.
-fun ForecastItemDto.toDomainDailyPlaceholder(): DailyForecast {
-    val weatherCond = this.weather?.firstOrNull()
-    return DailyForecast(
-        dateTimeMillis = this.dateTime ?: 0L,
-        sunriseMillis = 0L, // Placeholder - not directly available in ForecastItemDto
-        sunsetMillis = 0L,  // Placeholder - not directly available in ForecastItemDto
-        tempMinCelsius = this.main?.tempMin ?: this.main?.temp ?: 0.0, // Approximation
-        tempMaxCelsius = this.main?.tempMax ?: this.main?.temp ?: 0.0, // Approximation
-        tempDayCelsius = this.main?.temp ?: 0.0,
-        tempNightCelsius = this.main?.temp ?: 0.0, // Placeholder - needs night temp data
-        feelsLikeDayCelsius = this.main?.feelsLike ?: 0.0,
-        feelsLikeNightCelsius = this.main?.feelsLike ?: 0.0, // Placeholder
-        probabilityOfPrecipitation = this.probabilityOfPrecipitation ?: 0.0,
-        weatherConditionId = weatherCond?.id ?: 0,
-        weatherCondition = weatherCond?.main ?: "Unknown",
-        weatherDescription = weatherCond?.description ?: "No description",
-        weatherIconId = weatherCond?.icon ?: "",
-        windSpeedMps = this.wind?.speed ?: 0.0,
-        windDirectionDegrees = this.wind?.deg ?: 0,
-        humidityPercent = this.main?.humidity ?: 0,
-        pressureHpa = this.main?.pressure ?: 0,
-        uvi = 0.0 // Placeholder - UVI not in /forecast list items
+        humidityPercent = this.main?.humidity
+            ?: 0, // Check if 'main' in forecast item has 'humidity'
+        pressureHpa = this.main?.pressure
+            ?: 0      // Check if 'main' in forecast item has 'pressure'
     )
 }
 
 fun ForecastResponseDto.toDomainHourlyList(): List<HourlyForecast> {
     return this.list?.map { it.toDomainHourly() } ?: emptyList()
 }
-
-// Placeholder function for creating a list of daily forecasts.
-// This requires a strategy to select or aggregate data from the 3-hourly forecast items.
-fun ForecastResponseDto.toDomainDailyListPlaceholder(): List<DailyForecast> {
-    val dailyForecastsOutput = mutableListOf<DailyForecast>()
-    this.list?.groupBy { forecastItem ->
-        // Group by day using SimpleDateFormat
-        val date = Date((forecastItem.dateTime ?: 0L) * 1000L) // Ensure multiplication is Long
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(date)
-    }?.forEach { (_, hourlyItemsForDay) ->
-        // For simplicity, take an item around midday (e.g., the 4th 3-hour block if available)
-        // A more robust approach would aggregate min/max temperatures, dominant weather, etc.
-        hourlyItemsForDay.getOrNull(4)?.let { representativeItem ->
-            dailyForecastsOutput.add(representativeItem.toDomainDailyPlaceholder())
-        }
-    }
-    return dailyForecastsOutput.take(7) // Limit to a week for consistency
-}
-
 
 fun mapToWeatherDataBundle(
     currentWeatherDto: CurrentWeatherResponseDto,
@@ -115,19 +71,86 @@ fun mapToWeatherDataBundle(
     lon: Double
 ): WeatherDataBundle {
     val currentWeatherDomain = currentWeatherDto.toDomain()
-    // Take up to 8 hourly forecasts (next 24 hours)
-    val hourlyForecastsDomain = forecastResponseDto.toDomainHourlyList().take(8)
-    // Use the placeholder logic for daily forecasts
-    val dailyForecastsDomain = forecastResponseDto.toDomainDailyListPlaceholder()
+    val hourlyForecastsDomain = forecastResponseDto.toDomainHourlyList().take(8) // Next 24 hours
 
+    val dailyForecastsDomain = mutableListOf<DailyForecast>()
+    val groupedByDay = forecastResponseDto.list?.groupBy {
+        val date = Date((it.dateTime ?: 0L) * 1000L)
+        SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(date)
+    }
+
+    groupedByDay?.values?.take(7)?.forEach { dailyItems -> // Take up to 7 days
+        // Aggregate data for the day
+        var minTemp: Double? = null
+        var maxTemp: Double? = null
+        val tempsForDay = mutableListOf<Double>()
+        val feelsLikeForDay = mutableListOf<Double>()
+        val pops = mutableListOf<Double>()
+        val weatherConditionsCounts =
+            mutableMapOf<Pair<String?, String?>, Int>() // Pair of (main, icon) to count
+
+        dailyItems.forEach { item ->
+            item.main?.temp?.let { temp ->
+                tempsForDay.add(temp)
+                if (minTemp == null || temp < minTemp!!) minTemp = temp
+                if (maxTemp == null || temp > maxTemp!!) maxTemp = temp
+            }
+            item.main?.feelsLike?.let { feelsLikeForDay.add(it) }
+            item.probabilityOfPrecipitation?.let { pops.add(it) }
+            item.weather?.firstOrNull()?.let { cond ->
+                val key = Pair(cond.main, cond.icon)
+                weatherConditionsCounts[key] = (weatherConditionsCounts[key] ?: 0) + 1
+            }
+        }
+
+        // Select a representative item (e.g., first item of the day for dateTime, or midday item)
+        val representativeItem = dailyItems.firstOrNull() // Or find midday item
+
+        if (representativeItem != null) {
+            val dominantWeather = weatherConditionsCounts.maxByOrNull { it.value }?.key
+            dailyForecastsDomain.add(
+                DailyForecast(
+                    dateTimeMillis = (representativeItem.dateTime ?: 0L) * 1000L,
+                    sunriseMillis = (forecastResponseDto.city?.sunrise ?: 0L) * 1000L,
+                    sunsetMillis = (forecastResponseDto.city?.sunset ?: 0L) * 1000L,
+                    tempMinCelsius = minTemp ?: representativeItem.main?.temp ?: 0.0,
+                    tempMaxCelsius = maxTemp ?: representativeItem.main?.temp ?: 0.0,
+                    tempDayCelsius = if (tempsForDay.isNotEmpty()) tempsForDay.average() else representativeItem.main?.temp
+                        ?: 0.0,
+                    tempNightCelsius = 0.0, // Needs specific night data or better aggregation
+                    feelsLikeDayCelsius = if (feelsLikeForDay.isNotEmpty()) feelsLikeForDay.average() else representativeItem.main?.feelsLike
+                        ?: 0.0,
+                    feelsLikeNightCelsius = 0.0, // Needs specific night data
+                    probabilityOfPrecipitation = if (pops.isNotEmpty()) pops.maxOrNull()
+                        ?: 0.0 else 0.0, // Max POP for the day
+                    weatherConditionId = dominantWeather?.first?.hashCode()
+                        ?: representativeItem.weather?.firstOrNull()?.id ?: 0, // Simplification
+                    weatherCondition = dominantWeather?.first
+                        ?: representativeItem.weather?.firstOrNull()?.main ?: "Unknown",
+                    weatherDescription = representativeItem.weather?.firstOrNull()?.description
+                        ?: "No description", // Could take from dominant
+                    weatherIconId = dominantWeather?.second
+                        ?: representativeItem.weather?.firstOrNull()?.icon ?: "",
+                    windSpeedMps = representativeItem.wind?.speed ?: 0.0, // Could average wind
+                    windDirectionDegrees = representativeItem.wind?.deg
+                        ?: 0, // Could find dominant direction
+                    humidityPercent = representativeItem.main?.humidity
+                        ?: 0, // Could average humidity
+                    pressureHpa = representativeItem.main?.pressure
+                        ?: 0,     // Could average pressure
+                    uvi = 0.0 // UVI is not in /forecast list items, typically in OneCall's daily
+                )
+            )
+        }
+    }
+    Log.d("WeatherMapper", "Number of daily forecasts mapped: ${dailyForecastsDomain.size}")
     return WeatherDataBundle(
         latitude = lat,
         longitude = lon,
-        // Using city name from forecast if available, otherwise from current weather
         timezone = forecastResponseDto.city?.name ?: currentWeatherDto.cityName
         ?: "Unknown Location",
         currentWeather = currentWeatherDomain,
         hourlyForecasts = hourlyForecastsDomain,
-        dailyForecasts = dailyForecastsDomain
+        dailyForecasts = dailyForecastsDomain // This will now have more aggregated daily data
     )
 }
