@@ -144,6 +144,7 @@ fun mapToWeatherDataBundle(
         }
     }
     Log.d("WeatherMapper", "Number of daily forecasts mapped: ${dailyForecastsDomain.size}")
+
     return WeatherDataBundle(
         latitude = lat,
         longitude = lon,
