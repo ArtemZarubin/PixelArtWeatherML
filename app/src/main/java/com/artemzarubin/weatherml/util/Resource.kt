@@ -23,5 +23,5 @@ sealed class Resource<T>(
      * Represents a loading state.
      * Data can optionally be provided if showing old data while new data is loading.
      */
-    class Loading<T>(data: T? = null) : Resource<T>(data)
+    class Loading<T>(data: T? = null, message: String? = null) : Resource<T>(data, message)
 }

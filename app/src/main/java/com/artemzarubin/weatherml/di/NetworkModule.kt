@@ -1,8 +1,13 @@
 package com.artemzarubin.weatherml.di
 
+import android.app.Application
+import com.artemzarubin.weatherml.data.location.LocationTrackerImpl
 import com.artemzarubin.weatherml.data.remote.ApiService
 import com.artemzarubin.weatherml.data.repository.WeatherRepositoryImpl
+import com.artemzarubin.weatherml.domain.location.LocationTracker
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import dagger.Module
 import dagger.Provides
@@ -74,5 +79,21 @@ object NetworkModule {
     fun provideWeatherRepository(apiService: ApiService): WeatherRepository {
         // Hilt will provide ApiService, and we return our implementation
         return WeatherRepositoryImpl(apiService)
+    }
+
+    @Provides
+    @Singleton
+    fun provideFusedLocationProviderClient(application: Application): FusedLocationProviderClient {
+        return LocationServices.getFusedLocationProviderClient(application)
+    }
+
+    @Provides
+    @Singleton
+    fun provideLocationTracker(
+        application: Application,
+        fusedLocationProviderClient: FusedLocationProviderClient
+    ): LocationTracker {
+        // Hilt will provide Application and FusedLocationProviderClient
+        return LocationTrackerImpl(application, fusedLocationProviderClient)
     }
 }

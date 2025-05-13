@@ -113,6 +113,9 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling) // For Compose tooling in debug builds
     debugImplementation(libs.androidx.ui.test.manifest) // For UI tests
+
+    // Location check
+    implementation(libs.play.services.location) // For location
 }
 
 // Kapt configuration for Hilt (add to the end of the file if not present)

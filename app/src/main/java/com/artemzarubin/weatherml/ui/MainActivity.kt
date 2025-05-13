@@ -1,11 +1,17 @@
-// File: com/artemzarubin/weatherml/ui/MainActivity.kt
 package com.artemzarubin.weatherml.ui
 
 // Make sure all necessary imports are here, especially for PixelArtCard
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,16 +30,23 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
@@ -45,7 +58,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.artemzarubin.weatherml.R
 import com.artemzarubin.weatherml.domain.model.CurrentWeather
 import com.artemzarubin.weatherml.domain.model.DailyForecast
@@ -55,11 +72,80 @@ import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
 import com.artemzarubin.weatherml.ui.theme.WeatherMLTheme
 import com.artemzarubin.weatherml.util.Resource
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
+@Composable
+fun PixelatedSunLoader(modifier: Modifier = Modifier) {
+    val frames = listOf(
+        R.drawable.block_frame_1,
+        R.drawable.block_frame_2,
+        R.drawable.block_frame_3,
+        R.drawable.block_frame_4,
+        R.drawable.block_frame_5,
+        R.drawable.block_frame_6,
+        R.drawable.block_frame_7,
+        R.drawable.block_frame_8,
+        R.drawable.block_frame_9,
+        R.drawable.block_frame_10,
+        R.drawable.block_frame_11,
+        R.drawable.block_frame_12,
+        R.drawable.block_frame_13,
+        R.drawable.block_frame_14,
+        R.drawable.block_frame_15,
+        R.drawable.block_frame_16,
+        R.drawable.block_frame_17,
+        R.drawable.block_frame_18,
+        R.drawable.block_frame_19,
+        R.drawable.block_frame_20,
+        R.drawable.block_frame_21,
+        R.drawable.block_frame_22,
+        R.drawable.block_frame_23,
+        R.drawable.block_frame_24,
+        R.drawable.block_frame_25,
+        R.drawable.block_frame_26,
+        R.drawable.block_frame_27,
+        R.drawable.block_frame_28,
+        R.drawable.block_frame_29,
+        R.drawable.block_frame_30,
+        R.drawable.block_frame_31,
+        R.drawable.block_frame_32,
+        R.drawable.block_frame_33,
+        R.drawable.block_frame_34,
+        R.drawable.block_frame_35,
+        R.drawable.block_frame_36,
+        R.drawable.block_frame_37,
+        R.drawable.block_frame_38,
+        R.drawable.block_frame_39,
+        R.drawable.block_frame_40,
+        R.drawable.block_frame_41,
+        R.drawable.block_frame_42,
+        R.drawable.block_frame_43,
+        R.drawable.block_frame_44,
+        R.drawable.block_frame_45,
+        R.drawable.block_frame_46
+    )
+    var currentFrameIndex by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(150L)
+            currentFrameIndex = (currentFrameIndex + 1) % frames.size
+        }
+    }
+
+    Image(
+        painter = painterResource(id = frames[currentFrameIndex]),
+        contentDescription = "Loading animation",
+        modifier = modifier.size(48.dp),
+        contentScale = ContentScale.Fit,
+        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary)
+    )
+}
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -82,16 +168,109 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
     val weatherBundleState by viewModel.weatherDataState.collectAsState()
+    val context = LocalContext.current
 
-    LaunchedEffect(key1 = Unit) {
-        Log.d("WeatherScreen", "LaunchedEffect triggered. Fetching all weather data...")
-        viewModel.fetchAllWeatherData(latitude = 41.639412, longitude = 41.628371) // Batumi
+    var showPermissionRationale by rememberSaveable { mutableStateOf(false) }
+    var permissionsRequestedThisSession by rememberSaveable { mutableStateOf(false) } // Renamed for clarity
+
+    val locationPermissions = arrayOf(
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
+    )
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+        onResult = { permissions ->
+            permissionsRequestedThisSession = true
+            val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+            val coarseLocationGranted =
+                permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+            if (fineLocationGranted || coarseLocationGranted) {
+                Log.d(
+                    "WeatherScreen",
+                    "Permissions GRANTED via launcher. Initiating weather fetch."
+                )
+                viewModel.initiateWeatherFetch() // Call the new unified function
+            } else {
+                Log.d("WeatherScreen", "Permissions DENIED via launcher.")
+                val activity = context as? ComponentActivity
+                // Check if user selected "Don't ask again" for any of the permissions
+                val userPermanentlyDenied = locationPermissions.any { permission ->
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        permission
+                    ) == PackageManager.PERMISSION_DENIED &&
+                            activity?.shouldShowRequestPermissionRationale(permission) == false
+                }
+
+                if (userPermanentlyDenied) {
+                    viewModel.setPermissionError("Location permission permanently denied. Please enable it in app settings to see weather for your location.")
+                } else {
+                    viewModel.setPermissionError("Location permission denied. Weather for your location is unavailable.")
+                }
+                showPermissionRationale = true // Show UI to explain or retry/go to settings
+            }
+        }
+    )
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(
+        lifecycleOwner,
+        permissionsRequestedThisSession
+    ) { // Re-run if permissionsRequestedThisSession changes
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_START) {
+                val allPermissionsGranted = locationPermissions.all {
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        it
+                    ) == PackageManager.PERMISSION_GRANTED
+                }
+                if (allPermissionsGranted) {
+                    Log.d(
+                        "WeatherScreen",
+                        "Permissions ALREADY GRANTED on start. Initiating weather fetch."
+                    )
+                    viewModel.initiateWeatherFetch() // Call the new unified function
+                } else if (!permissionsRequestedThisSession) {
+                    // Only request if not already requested this session to avoid loop if user denies
+                    Log.d("WeatherScreen", "Permissions not granted. Requesting on start...")
+                    locationPermissionLauncher.launch(locationPermissions)
+                } else if (permissionsRequestedThisSession && !allPermissionsGranted && !showPermissionRationale) {
+                    // Permissions were requested this session, denied, and rationale not yet shown by onResult
+                    // This can happen if user denies and then app goes to background and foreground again
+                    Log.d(
+                        "WeatherScreen",
+                        "Permissions previously denied this session, showing rationale trigger."
+                    )
+                    showPermissionRationale = true
+                    viewModel.setPermissionError("Location permission is needed to show weather for your current location.")
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
+    // --- UI Display Logic ---
     when (val state = weatherBundleState) {
         is Resource.Loading<*> -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                PixelatedSunLoader()
+                state.message?.let {
+                    Text(
+                        it,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(16.dp)
+                    )
+                } // Show loading message
             }
         }
 
@@ -207,9 +386,51 @@ fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
         }
 
         is Resource.Error<*> -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Log.e("WeatherScreen", "Displaying Error UI. Message: ${state.message}")
-                Text("Error: ${state.message}", style = MaterialTheme.typography.bodyLarge)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState()), // Add scroll if content can be long
+                verticalArrangement = Arrangement.Center // Keep centered vertically on screen
+            ) {
+                Text(
+                    "Error: ${state.message}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Justify, // Align text
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (showPermissionRationale) { // Removed check for permanently denied here, button text will handle it
+                    Spacer(modifier = Modifier.height(16.dp))
+                    val isPermanentlyDenied = state.message?.contains("permanently denied") == true
+                    Button(
+                        onClick = {
+                            if (isPermanentlyDenied) {
+                                // Logic to open app settings
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                val uri = Uri.fromParts("package", context.packageName, null)
+                                intent.data = uri
+                                try {
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Log.e("WeatherScreen", "Could not open app settings", e)
+                                }
+                            } else {
+                                locationPermissionLauncher.launch(locationPermissions)
+                            }
+                            showPermissionRationale = false
+                        },
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        shape = RoundedCornerShape(4.dp), // Small rounded corners, or RectangleShape for sharp
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary
+                        )
+                    ) {
+                        Text(
+                            text = if (isPermanentlyDenied) "Open Settings" else "Retry Permissions",
+                            style = MaterialTheme.typography.headlineSmall // Ensure this uses your pixel font
+                        )
+                    }
+                }
             }
         }
     }

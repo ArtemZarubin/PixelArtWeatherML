@@ -2,7 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Internet permission (already added) -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Permissions for location access -->
+    <!-- For approximate location (network-based) -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- For precise location (GPS and network-based) -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
         android:name=".WeatherMLApplication"
@@ -21,7 +28,6 @@
             android:theme="@style/Theme.WeatherML">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
