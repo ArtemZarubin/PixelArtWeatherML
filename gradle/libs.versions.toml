@@ -3,6 +3,7 @@
 [versions]
 # Android Gradle Plugin and Kotlin versions are derived from the current project setup.
 agp = "8.10.0"
+foundation = "1.8.1"
 kotlin = "2.1.20"
 # The Compose Compiler version must be compatible with the Kotlin version.
 # Checked compatibility: Kotlin 2.1.20 with Compose Compiler X.Y.Z (e.g., 1.5.11 or newer if stable for K2. Starting with Kotlin version 2.0.0 must use Compose Compiler Gradle plugin).
@@ -33,6 +34,7 @@ tensorflowLiteSupport = "0.5.0"
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "foundation" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
