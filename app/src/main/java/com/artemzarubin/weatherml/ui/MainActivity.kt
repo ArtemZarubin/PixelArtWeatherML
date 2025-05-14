@@ -1,6 +1,5 @@
 package com.artemzarubin.weatherml.ui
 
-// Make sure all necessary imports are here, especially for PixelArtCard
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +12,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,37 +25,57 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -64,6 +86,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.artemzarubin.weatherml.R
+import com.artemzarubin.weatherml.data.remote.dto.GeoapifyFeatureDto
 import com.artemzarubin.weatherml.domain.model.CurrentWeather
 import com.artemzarubin.weatherml.domain.model.DailyForecast
 import com.artemzarubin.weatherml.domain.model.HourlyForecast
@@ -129,11 +152,11 @@ fun PixelatedSunLoader(modifier: Modifier = Modifier) {
         R.drawable.block_frame_45,
         R.drawable.block_frame_46
     )
-    var currentFrameIndex by remember { mutableStateOf(0) }
+    var currentFrameIndex by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            delay(150L)
+            delay(28L) // Preferred delay
             currentFrameIndex = (currentFrameIndex + 1) % frames.size
         }
     }
@@ -141,9 +164,9 @@ fun PixelatedSunLoader(modifier: Modifier = Modifier) {
     Image(
         painter = painterResource(id = frames[currentFrameIndex]),
         contentDescription = "Loading animation",
-        modifier = modifier.size(48.dp),
-        contentScale = ContentScale.Fit,
-        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary)
+        modifier = modifier.size(100.dp), // Preferred size
+        contentScale = ContentScale.Fit
+        // colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary) // Optional tint
     )
 }
 
@@ -151,12 +174,12 @@ fun PixelatedSunLoader(modifier: Modifier = Modifier) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // enableEdgeToEdge()
+        // enableEdgeToEdge() // Kept commented out, Scaffold will handle insets
         setContent {
             WeatherMLTheme {
-                Surface(
+                Surface( // Surface is now inside WeatherMLTheme, which is good
                     modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
+                    color = MaterialTheme.colorScheme.background // Main background for the app
                 ) {
                     WeatherScreen()
                 }
@@ -165,13 +188,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
     val weatherBundleState by viewModel.weatherDataState.collectAsState()
+    val autocompleteResultsState by viewModel.autocompleteResults.collectAsState()
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
 
     var showPermissionRationale by rememberSaveable { mutableStateOf(false) }
-    var permissionsRequestedThisSession by rememberSaveable { mutableStateOf(false) } // Renamed for clarity
+    var permissionsRequestedThisSession by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showSearchUi by rememberSaveable { mutableStateOf(false) }
 
     val locationPermissions = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
@@ -185,272 +214,469 @@ fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
             val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
             val coarseLocationGranted =
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
-
             if (fineLocationGranted || coarseLocationGranted) {
-                Log.d(
-                    "WeatherScreen",
-                    "Permissions GRANTED via launcher. Initiating weather fetch."
-                )
-                viewModel.initiateWeatherFetch() // Call the new unified function
+                showPermissionRationale = false; viewModel.initiateWeatherFetch()
             } else {
-                Log.d("WeatherScreen", "Permissions DENIED via launcher.")
                 val activity = context as? ComponentActivity
-                // Check if user selected "Don't ask again" for any of the permissions
-                val userPermanentlyDenied = locationPermissions.any { permission ->
+                val userPermanentlyDenied = locationPermissions.any { perm ->
                     ContextCompat.checkSelfPermission(
                         context,
-                        permission
-                    ) == PackageManager.PERMISSION_DENIED &&
-                            activity?.shouldShowRequestPermissionRationale(permission) == false
+                        perm
+                    ) == PackageManager.PERMISSION_DENIED && activity?.shouldShowRequestPermissionRationale(
+                        perm
+                    ) == false
                 }
-
-                if (userPermanentlyDenied) {
-                    viewModel.setPermissionError("Location permission permanently denied. Please enable it in app settings to see weather for your location.")
-                } else {
-                    viewModel.setPermissionError("Location permission denied. Weather for your location is unavailable.")
-                }
-                showPermissionRationale = true // Show UI to explain or retry/go to settings
+                viewModel.setPermissionError(if (userPermanentlyDenied) "Location permission permanently denied. Please enable it in app settings." else "Location permission denied.")
+                showPermissionRationale = true
             }
         }
     )
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(
-        lifecycleOwner,
-        permissionsRequestedThisSession
-    ) { // Re-run if permissionsRequestedThisSession changes
+    DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                val allPermissionsGranted = locationPermissions.all {
+                val allGranted = locationPermissions.all {
                     ContextCompat.checkSelfPermission(
                         context,
                         it
                     ) == PackageManager.PERMISSION_GRANTED
                 }
-                if (allPermissionsGranted) {
-                    Log.d(
-                        "WeatherScreen",
-                        "Permissions ALREADY GRANTED on start. Initiating weather fetch."
-                    )
-                    viewModel.initiateWeatherFetch() // Call the new unified function
+                if (allGranted) {
+                    showPermissionRationale = false; viewModel.initiateWeatherFetch()
                 } else if (!permissionsRequestedThisSession) {
-                    // Only request if not already requested this session to avoid loop if user denies
-                    Log.d("WeatherScreen", "Permissions not granted. Requesting on start...")
                     locationPermissionLauncher.launch(locationPermissions)
-                } else if (permissionsRequestedThisSession && !allPermissionsGranted && !showPermissionRationale) {
-                    // Permissions were requested this session, denied, and rationale not yet shown by onResult
-                    // This can happen if user denies and then app goes to background and foreground again
-                    Log.d(
-                        "WeatherScreen",
-                        "Permissions previously denied this session, showing rationale trigger."
-                    )
+                } else {
                     showPermissionRationale = true
-                    viewModel.setPermissionError("Location permission is needed to show weather for your current location.")
+                    if (weatherBundleState.message?.contains("permanently denied") != true && weatherBundleState.message?.contains(
+                            "permission denied",
+                            ignoreCase = true
+                        ) != true
+                    ) {
+                        viewModel.setPermissionError("Location permission is needed.")
+                    }
                 }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // --- UI Display Logic ---
-    when (val state = weatherBundleState) {
-        is Resource.Loading<*> -> {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                PixelatedSunLoader()
-                state.message?.let {
-                    Text(
-                        it,
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(16.dp)
-                    )
-                } // Show loading message
-            }
-        }
+    Scaffold(
+        topBar = {
+            // TopAppBar is shown only when not in search mode AND weather data is successfully loaded (or no error related to permissions)
+            val canShowTopBar = !showSearchUi &&
+                    (weatherBundleState is Resource.Success<*> ||
+                            (weatherBundleState is Resource.Error<*> && weatherBundleState.message?.contains(
+                                "permission",
+                                ignoreCase = true
+                            ) != true))
 
-        is Resource.Success<*> -> {
-            val bundle = state.data
-            if (bundle != null) {
-                val systemBarsPadding = WindowInsets.systemBars.asPaddingValues()
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = systemBarsPadding.calculateTopPadding() + 16.dp,
-                            bottom = systemBarsPadding.calculateBottomPadding() + 16.dp
-                        ),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+            if (canShowTopBar) {
+                Surface( // Wrap TopAppBar in Surface to apply shadowElevation
+                    shadowElevation = 3.dp, // Your desired shadow
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f) // Background for TopAppBar area
                 ) {
-                    // --- 1. Current Weather Main Info Section (MOVED TO TOP) ---
-                    /*PixelArtCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        internalPadding = 16.dp,
-                        borderWidth = 2.dp
-                    ) {
-                        CurrentWeatherMainSection(currentWeather = bundle.currentWeather)
-                    }*/
-                    CurrentWeatherMainSection(currentWeather = bundle.currentWeather)
-
-                    // --- 2. Hourly Forecast Section ---
-                    PixelArtCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        internalPadding = 8.dp,
-                        borderWidth = 2.dp
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    TopAppBar(
+                        title = {
+                            val currentWeatherData =
+                                (weatherBundleState as? Resource.Success)?.data?.currentWeather
+                            // Use showSearchUi here, which is defined in WeatherScreen's scope
+                            val displayTitle = if (showSearchUi) { // <--- USE showSearchUi HERE
+                                "Search Location"
+                            } else {
+                                currentWeatherData?.let {
+                                    "${it.cityName}${it.countryCode?.let { code -> ", $code" } ?: ""}"
+                                } ?: "WeatherML"
+                            }
                             Text(
-                                "Hourly Forecast (Next 24 Hours)",
+                                text = displayTitle,
                                 style = MaterialTheme.typography.headlineSmall,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            if (bundle.hourlyForecasts.isEmpty()) {
+                        },
+                        actions = {
+                            IconButton(onClick = { showSearchUi = true }) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    "Search City",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                ) // Adjusted tint
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent // Make TopAppBar itself transparent
+                        )
+                    )
+                }
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    ) { scaffoldPaddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(scaffoldPaddingValues)
+        ) {
+            // --- UI Display Logic based on weatherBundleState ---
+            when (val currentContentState = weatherBundleState) {
+                is Resource.Loading<*> -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            PixelatedSunLoader(); Spacer(modifier = Modifier.height(16.dp))
+                            currentContentState.message?.let {
                                 Text(
-                                    "No hourly forecast data available.",
+                                    it,
                                     style = MaterialTheme.typography.bodyMedium
                                 )
-                            } else {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 4.dp)
-                                ) {
-                                    items(bundle.hourlyForecasts) { hourlyItem ->
-                                        SimpleHourlyForecastItemView(hourlyItem)
-                                    }
-                                }
                             }
                         }
                     }
+                }
 
-                    // --- 3. Daily Forecast Section ---
-                    PixelArtCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        internalPadding = 8.dp,
-                        borderWidth = 2.dp
+                is Resource.Error<*> -> {
+                    if (!(showPermissionRationale && currentContentState.message?.contains(
+                            "permission",
+                            ignoreCase = true
+                        ) == true)
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                "Daily Forecast (Next ${bundle.dailyForecasts.size} Days)",
-                                style = MaterialTheme.typography.headlineSmall,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                "Error: ${currentContentState.message ?: "Unknown error"}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(16.dp)
                             )
-                            if (bundle.dailyForecasts.isEmpty()) {
-                                Text(
-                                    "No daily forecast data available.",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            } else {
-                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                    bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
-                                        SimplifiedDailyForecastItemView(dailyItem)
-                                        if (index < bundle.dailyForecasts.size - 1) {
-                                            HorizontalDivider(
-                                                color = MaterialTheme.colorScheme.outline.copy(
-                                                    alpha = 0.5f
+                        }
+                    }
+                    // Permission error UI with button is handled by the overlay Box at the end
+                }
+
+                is Resource.Success<*> -> {
+                    val bundle = currentContentState.data
+                    if (bundle != null && !showSearchUi) { // Show weather content only if not in search mode
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(
+                                    horizontal = 16.dp,
+                                    vertical = 8.dp
+                                ), // Adjusted vertical padding
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            // CityHeaderSection is effectively replaced by TopAppBar content
+                            // --- Current Weather Main Info Section ---
+                            CurrentWeatherMainSection(currentWeather = bundle.currentWeather) // This will no longer contain city name
+
+                            // --- Hourly Forecast Section ---
+                            PixelArtCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                internalPadding = 8.dp,
+                                borderWidth = 2.dp
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "Hourly Forecast (Next 24 Hours)",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                    )
+                                    if (bundle.hourlyForecasts.isEmpty()) { /* ... */
+                                    } else {
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier.padding(horizontal = 4.dp)
+                                        ) {
+                                            items(bundle.hourlyForecasts) {
+                                                SimpleHourlyForecastItemView(
+                                                    it
                                                 )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- Daily Forecast Section ---
+                            PixelArtCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                internalPadding = 8.dp,
+                                borderWidth = 2.dp
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        "Daily Forecast (Next ${bundle.dailyForecasts.size} Days)",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                    )
+                                    if (bundle.dailyForecasts.isEmpty()) { /* ... */
+                                    } else {
+                                        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                            bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
+                                                SimplifiedDailyForecastItemView(
+                                                    dailyItem
+                                                ); if (index < bundle.dailyForecasts.size - 1) {
+                                                HorizontalDivider(
+                                                    color = MaterialTheme.colorScheme.outline.copy(
+                                                        alpha = 0.5f
+                                                    )
+                                                )
+                                            }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- Current Weather Details Section ---
+                            PixelArtCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                internalPadding = 16.dp,
+                                borderWidth = 2.dp
+                            ) {
+                                CurrentWeatherDetailsSection(currentWeather = bundle.currentWeather)
+                            }
+                        }
+                    } else if (bundle == null && !showSearchUi) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "Weather data is currently unavailable.",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+                    }
+                }
+            }
+
+            // --- Search UI Overlay ---
+            if (showSearchUi) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(WindowInsets.systemBars.asPaddingValues()) // Insets for edge-to-edge inside search
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Search Location", style = MaterialTheme.typography.headlineSmall)
+                            IconButton(onClick = {
+                                showSearchUi = false; searchQuery =
+                                ""; viewModel.clearGeocodingResults(); keyboardController?.hide(); focusManager.clearFocus()
+                            }) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    "Close Search",
+                                    tint = MaterialTheme.colorScheme.onBackground
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { newText ->
+                                searchQuery =
+                                    newText; if (newText.length >= 3) viewModel.searchCityAutocomplete(
+                                newText
+                            ) else if (newText.isBlank()) viewModel.clearGeocodingResults()
+                            },
+                            label = {
+                                Text(
+                                    "Enter city name",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            textStyle = MaterialTheme.typography.bodyLarge,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                if (searchQuery.isNotBlank()) viewModel.searchCityAutocomplete(
+                                    searchQuery
+                                ); keyboardController?.hide(); focusManager.clearFocus()
+                            })
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        val currentAutocompleteState = autocompleteResultsState
+                        if (searchQuery.length >= 3) {
+                            when (currentAutocompleteState) {
+                                is Resource.Loading -> {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .padding(vertical = 8.dp)
+                                    )
+                                }
+
+                                is Resource.Success -> {
+                                    val locations = currentAutocompleteState.data
+                                    if (!locations.isNullOrEmpty()) {
+                                        LazyColumn(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .heightIn(max = 150.dp)
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                                                )
+                                        ) { // Added weight(1f) and min height
+                                            items(locations) { feature ->
+                                                LocationSearchResultItem(feature = feature) {
+                                                    viewModel.onCitySuggestionSelected(feature)
+                                                    searchQuery = ""
+                                                    showSearchUi = false // Close search UI
+                                                    keyboardController?.hide(); focusManager.clearFocus()
+                                                }
+                                                if (locations.last() != feature) HorizontalDivider(
+                                                    color = MaterialTheme.colorScheme.outline.copy(
+                                                        alpha = 0.5f
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    } else if (currentAutocompleteState.data != null) {
+                                        Text(
+                                            "No cities found for \"$searchQuery\"",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
+                                    }
+                                }
+
+                                is Resource.Error -> {
+                                    currentAutocompleteState.message?.let {
+                                        if (it != "City name cannot be empty.") {
+                                            Text(
+                                                "Search Error: $it",
+                                                color = MaterialTheme.colorScheme.error,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                modifier = Modifier.padding(vertical = 8.dp)
                                             )
                                         }
                                     }
                                 }
                             }
                         }
+                        if (!(searchQuery.length >= 3 && autocompleteResultsState is Resource.Success && !(autocompleteResultsState as Resource.Success<List<GeoapifyFeatureDto>>).data.isNullOrEmpty())) {
+                            Spacer(modifier = Modifier.weight(1f)) // Pushes content up if list is short or not present
+                        }
                     }
-
-                    // --- 4. Current Weather Details Section (MOVED TO BOTTOM) ---
-                    PixelArtCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        internalPadding = 16.dp,
-                        borderWidth = 2.dp
-                    ) {
-                        // Ensuring the content of CurrentWeatherDetailsSection is also centered if needed
-                        CurrentWeatherDetailsSection(currentWeather = bundle.currentWeather)
-                    }
-                }
-            } else {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Weather data is currently unavailable.",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
                 }
             }
-        }
 
-        is Resource.Error<*> -> {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()), // Add scroll if content can be long
-                verticalArrangement = Arrangement.Center // Keep centered vertically on screen
+            // --- Permission Error UI Overlay (should be the topmost if active and search is not active) ---
+            if (!showSearchUi && weatherBundleState is Resource.Error && weatherBundleState.message?.contains(
+                    "permission",
+                    ignoreCase = true
+                ) == true && showPermissionRationale
             ) {
-                Text(
-                    "Error: ${state.message}",
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Justify, // Align text
-                    modifier = Modifier.fillMaxWidth()
-                )
-                if (showPermissionRationale) { // Removed check for permanently denied here, button text will handle it
-                    Spacer(modifier = Modifier.height(16.dp))
-                    val isPermanentlyDenied = state.message?.contains("permanently denied") == true
-                    Button(
-                        onClick = {
-                            if (isPermanentlyDenied) {
-                                // Logic to open app settings
-                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                                val uri = Uri.fromParts("package", context.packageName, null)
-                                intent.data = uri
-                                try {
-                                    context.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Log.e("WeatherScreen", "Could not open app settings", e)
-                                }
-                            } else {
-                                locationPermissionLauncher.launch(locationPermissions)
-                            }
-                            showPermissionRationale = false
-                        },
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                        shape = RoundedCornerShape(4.dp), // Small rounded corners, or RectangleShape for sharp
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary
-                        )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = if (isPermanentlyDenied) "Open Settings" else "Retry Permissions",
-                            style = MaterialTheme.typography.headlineSmall // Ensure this uses your pixel font
+                            "Error: ${weatherBundleState.message}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Justify,
+                            modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        val isPermanentlyDenied =
+                            weatherBundleState.message!!.contains("permanently denied")
+                        Button(
+                            onClick = {
+                                if (isPermanentlyDenied) {
+                                    val intent =
+                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                    val uri = Uri.fromParts("package", context.packageName, null)
+                                    intent.data = uri
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Log.e("WeatherScreen", "Could not open app settings", e)
+                                    }
+                                } else {
+                                    locationPermissionLauncher.launch(locationPermissions)
+                                }
+                                showPermissionRationale = false
+                            },
+                            shape = RoundedCornerShape(4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        ) {
+                            Text(
+                                if (isPermanentlyDenied) "Open Settings" else "Retry Permissions",
+                                style = MaterialTheme.typography.headlineSmall
+                            )
+                        }
                     }
                 }
             }
-        }
+        } // End of main screen Box (content of Scaffold)
+    } // End of Scaffold
+}
+
+@Composable
+fun LocationSearchResultItem(
+    feature: GeoapifyFeatureDto,
+    onClick: () -> Unit
+) {
+    val properties = feature.properties
+    val displayName = listOfNotNull(
+        properties?.city,
+        properties?.state,
+        properties?.countryCode?.uppercase()
+    ).joinToString(", ").ifBlank { properties?.formattedAddress ?: "Unknown location" }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = displayName,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
-// --- Composable Functions for Weather Sections ---
-
+// Update CurrentWeatherMainSection to NOT include city name and last update
 @Composable
 fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = "${currentWeather.cityName}${currentWeather.countryCode?.let { ", $it" } ?: ""}",
-            style = MaterialTheme.typography.titleLarge
-        )
-        Text(
+        // City name and last update are now in CityHeaderSection or directly in WeatherScreen
+        /*Text(
             text = "Last update: ${
                 formatUnixTimestampToDateTime(
                     currentWeather.dateTimeMillis,
@@ -458,8 +684,8 @@ fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
                 )
             }",
             style = MaterialTheme.typography.bodySmall
-        )
-        Spacer(modifier = Modifier.height(16.dp))
+        )*/
+        // Spacer(modifier = Modifier.height(1.dp))
         val largeIconResId = getWeatherIconResourceId(
             iconId = currentWeather.weatherIconId,
             iconPrefix = "icon_512_"
@@ -666,7 +892,7 @@ fun SimplifiedDailyForecastItemView(dailyForecast: DailyForecast) {
     // HorizontalDivider is now handled by the parent Column's forEachIndexed
 }
 
-// --- Helper Functions ---
+/*// --- Helper Functions ---
 fun formatUnixTimestampToDateTime(timestampMillis: Long, timezoneOffsetSeconds: Int): String {
     if (timestampMillis == 0L) return "N/A"
     val date = Date(timestampMillis)
@@ -675,7 +901,7 @@ fun formatUnixTimestampToDateTime(timestampMillis: Long, timezoneOffsetSeconds: 
     customTimeZone.rawOffset = timezoneOffsetSeconds * 1000
     sdf.timeZone = customTimeZone
     return sdf.format(date)
-}
+}*/
 
 fun formatUnixTimestampToTime(timestampMillis: Long, timezoneOffsetSeconds: Int): String {
     if (timestampMillis == 0L) return "N/A"
@@ -716,7 +942,8 @@ fun getWeatherIconResourceId(iconId: String?, iconPrefix: String = "icon_"): Int
     }
     val context = LocalContext.current
     val resourceName = iconPrefix + iconId.lowercase()
-    val resourceId = context.resources.getIdentifier(resourceName, "drawable", context.packageName)
+    val resourceId =
+        context.resources.getIdentifier(resourceName, "drawable", context.packageName)
     return if (resourceId != 0) resourceId else R.drawable.ic_weather_placeholder
 }
 

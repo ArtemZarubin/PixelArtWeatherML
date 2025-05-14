@@ -1,8 +1,11 @@
 package com.artemzarubin.weatherml.data.repository
 
 // DTO imports are still needed here as ApiService returns DTOs
+import android.util.Log
 import com.artemzarubin.weatherml.data.mapper.mapToWeatherDataBundle
 import com.artemzarubin.weatherml.data.remote.ApiService
+import com.artemzarubin.weatherml.data.remote.dto.GeoapifyAutocompleteResponseDto
+import com.artemzarubin.weatherml.data.remote.dto.GeoapifyFeatureDto
 import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.Resource
@@ -65,6 +68,37 @@ class WeatherRepositoryImpl @Inject constructor(
                 Resource.Error(
                     message = e.message ?: "An unknown error occurred fetching weather data"
                 )
+            }
+        }
+    }
+
+    override suspend fun getCityAutocompleteSuggestions(
+        query: String,
+        apiKey: String,
+        limit: Int
+    ): Resource<List<GeoapifyFeatureDto>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response: GeoapifyAutocompleteResponseDto = apiService.getCityAutocomplete(
+                    text = query,
+                    apiKey = apiKey,
+                    limit = limit,
+                    // type = type
+                )
+                // The API returns a wrapper object containing a list of features
+                Resource.Success(data = response.features ?: emptyList())
+            } catch (e: Exception) {
+                Log.e(
+                    "WeatherRepositoryImpl",
+                    "Network error: ${e.javaClass.simpleName}",
+                    e
+                ) // Log type
+                val errorMessage = when (e) {
+                    is java.net.UnknownHostException -> "No internet connection or server unavailable."
+                    is java.net.SocketTimeoutException -> "Request timed out. Check your connection."
+                    else -> e.message ?: "An unknown network error occurred."
+                }
+                Resource.Error(message = errorMessage)
             }
         }
     }

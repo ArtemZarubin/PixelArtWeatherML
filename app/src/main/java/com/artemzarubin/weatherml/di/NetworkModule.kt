@@ -53,7 +53,7 @@ object NetworkModule {
         return Json {
             ignoreUnknownKeys = true // Ignores keys in JSON that are not in our data classes
             isLenient = true         // Allows for some malformed JSON (use with caution)
-            // coerceInputValues = true // If you want to coerce incorrect types to default values
+            coerceInputValues = true
         }
     }
 

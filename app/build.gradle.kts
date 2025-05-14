@@ -34,6 +34,9 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "OPEN_WEATHER_API_KEY", "\"$openWeatherApiKeyFromProperties\"")
+
+        val geoapifyApiKey: String = localProperties.getProperty("GEOAPIFY_API_KEY") ?: ""
+        buildConfigField("String", "GEOAPIFY_API_KEY", "\"$geoapifyApiKey\"")
     }
 
     buildTypes {
