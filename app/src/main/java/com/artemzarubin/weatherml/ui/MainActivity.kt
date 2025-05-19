@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -386,7 +385,12 @@ fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
                                         style = MaterialTheme.typography.headlineSmall,
                                         modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
                                     )
-                                    if (bundle.hourlyForecasts.isEmpty()) { /* ... */
+                                    if (bundle.hourlyForecasts.isEmpty()) {
+                                        Text(
+                                            "Hourly forecast data is currently unavailable.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
                                     } else {
                                         LazyRow(
                                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -414,7 +418,12 @@ fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
                                         style = MaterialTheme.typography.headlineSmall,
                                         modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
                                     )
-                                    if (bundle.dailyForecasts.isEmpty()) { /* ... */
+                                    if (bundle.dailyForecasts.isEmpty()) {
+                                        Text(
+                                            "Daily forecast data is currently unavailable.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.padding(vertical = 8.dp)
+                                        )
                                     } else {
                                         Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                                             bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
@@ -529,7 +538,7 @@ fun WeatherScreen(viewModel: MainViewModel = hiltViewModel()) {
                                         LazyColumn(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .heightIn(max = 150.dp)
+                                                .heightIn(max = 300.dp)
                                                 .border(
                                                     1.dp,
                                                     MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
@@ -713,6 +722,15 @@ fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
             text = "Feels like: ${currentWeather.feelsLikeCelsius.toInt()}°C",
             style = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
         )
+        currentWeather.mlFeelsLikeCelsius?.let { mlFeels ->
+            Text(
+                text = "Feels like (ML): ${mlFeels.toInt()}°C", // Округлюємо до цілого
+                style = MaterialTheme.typography.titleSmall.copy(
+                    color = MaterialTheme.colorScheme.secondary // Інший колір
+                ),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
     }
 }
 
@@ -846,18 +864,23 @@ fun SimplifiedDailyForecastItemView(dailyForecast: DailyForecast) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            .padding(vertical = 8.dp, horizontal = 4.dp), // Adjusted padding
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Date
         Text(
             text = formatUnixTimestampToDay(dailyForecast.dateTimeMillis),
             style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(2.5f),
-            textAlign = TextAlign.Start
+            modifier = Modifier.weight(2.2f), // Weight for date
+            textAlign = TextAlign.Start,
+            maxLines = 2 // Allow date to wrap if needed
         )
-        Spacer(modifier = Modifier.width(8.dp))
 
-        Box(modifier = Modifier.weight(1.2f), contentAlignment = Alignment.Center) {
+        // Icon
+        Box(
+            modifier = Modifier.weight(1.0f), // Weight for icon
+            contentAlignment = Alignment.Center
+        ) {
             val dailyIconResId = getWeatherIconResourceId(
                 iconId = dailyForecast.weatherIconId,
                 iconPrefix = "icon_128_"
@@ -865,31 +888,40 @@ fun SimplifiedDailyForecastItemView(dailyForecast: DailyForecast) {
             Image(
                 painter = painterResource(id = dailyIconResId),
                 contentDescription = dailyForecast.weatherDescription,
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier.size(30.dp), // Slightly adjusted icon size
                 contentScale = ContentScale.Fit,
                 colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
             )
         }
-        Spacer(modifier = Modifier.width(8.dp))
 
+        // Condition
         Text(
             text = dailyForecast.weatherCondition,
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(2f),
+            modifier = Modifier.weight(1.8f), // Weight for condition
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Start
         )
-        Spacer(modifier = Modifier.width(8.dp))
 
-        Text(
-            text = "${dailyForecast.tempMaxCelsius.toInt()}°/${dailyForecast.tempMinCelsius.toInt()}°",
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.weight(2f),
-            textAlign = TextAlign.End
-        )
+        // Column for Temperatures, API POP, and ML Prediction - Aligned to End
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.weight(2.0f) // Weight for this column
+        ) {
+            Text(
+                text = "${dailyForecast.tempMaxCelsius.toInt()}°/${dailyForecast.tempMinCelsius.toInt()}°",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+            )
+            // API POP
+            Text(
+                text = "POP: ${(dailyForecast.probabilityOfPrecipitation * 100).toInt()}%", // Changed from "API POP"
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
     }
-    // HorizontalDivider is now handled by the parent Column's forEachIndexed
+    // HorizontalDivider is handled by the parent
 }
 
 /*// --- Helper Functions ---
@@ -933,6 +965,25 @@ fun degreesToCardinalDirection(degrees: Int): String {
         "NNW"
     )
     return directions[(degrees / 22.5).toInt() % 16]
+}
+
+fun getAqiInterpretation(aqiValue: Float?): String {
+    if (aqiValue == null) return "N/A"
+    // Round to nearest integer for category mapping, or use ranges
+    val roundedAqi = Math.round(aqiValue)
+    return when (roundedAqi) {
+        1 -> "Good"
+        2 -> "Moderate"
+        3 -> "Unhealthy for Sensitive" // Groups
+        4 -> "Unhealthy"
+        5 -> "Very Unhealthy"
+        6 -> "Hazardous"
+        else -> { // Handle values outside 1-6, though model should output within this if trained on it
+            if (aqiValue < 1) "Good"
+            else if (aqiValue > 6) "Hazardous"
+            else "Unknown"
+        }
+    }
 }
 
 @Composable

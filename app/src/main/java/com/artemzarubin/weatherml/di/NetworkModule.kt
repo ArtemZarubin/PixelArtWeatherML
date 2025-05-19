@@ -1,10 +1,14 @@
 package com.artemzarubin.weatherml.di
 
 import android.app.Application
+import android.content.Context
+import android.util.Log
 import com.artemzarubin.weatherml.data.location.LocationTrackerImpl
+import com.artemzarubin.weatherml.data.ml.WeatherModelInterpreterImpl
 import com.artemzarubin.weatherml.data.remote.ApiService
 import com.artemzarubin.weatherml.data.repository.WeatherRepositoryImpl
 import com.artemzarubin.weatherml.domain.location.LocationTracker
+import com.artemzarubin.weatherml.domain.ml.WeatherModelInterpreter
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
@@ -12,6 +16,7 @@ import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFact
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -76,9 +81,12 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideWeatherRepository(apiService: ApiService): WeatherRepository {
-        // Hilt will provide ApiService, and we return our implementation
-        return WeatherRepositoryImpl(apiService)
+    fun provideWeatherRepository(
+        apiService: ApiService,
+        modelInterpreter: WeatherModelInterpreter // <--- ADDING THIS PARAMETER
+    ): WeatherRepository {
+        // Hilt will provide both ApiService and WeatherModelInterpreter
+        return WeatherRepositoryImpl(apiService, modelInterpreter) // <--- PASSING BOTH ARGUMENTS
     }
 
     @Provides
@@ -95,5 +103,22 @@ object NetworkModule {
     ): LocationTracker {
         // Hilt will provide Application and FusedLocationProviderClient
         return LocationTrackerImpl(application, fusedLocationProviderClient)
+    }
+
+    @Provides
+    @Singleton
+    fun provideWeatherModelInterpreter(@ApplicationContext context: Context): WeatherModelInterpreter {
+        val interpreter = WeatherModelInterpreterImpl(context)
+        // Initialize the interpreter when it's first provided.
+        // It's important because model loading and scaler param loading can take time.
+        if (!interpreter.initialize()) {
+            Log.e(
+                "HiltModule",
+                "Failed to initialize WeatherModelInterpreter! Model predictions might not work."
+            )
+            // You might want to return a different "no-op" implementation here
+            // or let the app proceed and handle null predictions from the interpreter.
+        }
+        return interpreter
     }
 }

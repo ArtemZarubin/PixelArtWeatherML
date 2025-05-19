@@ -44,8 +44,7 @@ fun ForecastItemDto.toDomainHourly(): HourlyForecast {
     return HourlyForecast(
         dateTimeMillis = (this.dateTime ?: 0L) * 1000L,
         temperatureCelsius = this.main?.temp ?: 0.0,
-        feelsLikeCelsius = this.main?.feelsLike
-            ?: 0.0, // Check if 'main' in forecast item has 'feels_like'
+        feelsLikeCelsius = this.main?.feelsLike ?: 0.0,
         probabilityOfPrecipitation = this.probabilityOfPrecipitation ?: 0.0,
         weatherConditionId = weatherCond?.id ?: 0,
         weatherCondition = weatherCond?.main ?: "Unknown",
@@ -53,10 +52,9 @@ fun ForecastItemDto.toDomainHourly(): HourlyForecast {
         weatherIconId = weatherCond?.icon ?: "",
         windSpeedMps = this.wind?.speed ?: 0.0,
         windDirectionDegrees = this.wind?.deg ?: 0,
-        humidityPercent = this.main?.humidity
-            ?: 0, // Check if 'main' in forecast item has 'humidity'
-        pressureHpa = this.main?.pressure
-            ?: 0      // Check if 'main' in forecast item has 'pressure'
+        humidityPercent = this.main?.humidity ?: 0,
+        pressureHpa = this.main?.pressure ?: 0,
+        cloudinessPercent = this.clouds?.all // <--- ADDED: Getting cloudiness
     )
 }
 

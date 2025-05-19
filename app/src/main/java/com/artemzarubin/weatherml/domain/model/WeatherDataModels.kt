@@ -21,17 +21,18 @@ data class CurrentWeather(
     val weatherIconId: String,        // Icon ID from API (e.g., "01d")
     val cityName: String,
     val countryCode: String?,         // e.g., "UA"
-    val timezoneOffsetSeconds: Int    // Shift in seconds from UTC for the location
+    val timezoneOffsetSeconds: Int,    // Shift in seconds from UTC for the location
+    val mlFeelsLikeCelsius: Float? = null
 )
 
 /**
  * Represents a single hourly forecast item.
  */
 data class HourlyForecast(
-    val dateTimeMillis: Long,         // Unix timestamp, UTC
+    val dateTimeMillis: Long,
     val temperatureCelsius: Double,
     val feelsLikeCelsius: Double,
-    val probabilityOfPrecipitation: Double, // 0.0 to 1.0
+    val probabilityOfPrecipitation: Double,
     val weatherConditionId: Int,
     val weatherCondition: String,
     val weatherDescription: String,
@@ -39,7 +40,8 @@ data class HourlyForecast(
     val windSpeedMps: Double,
     val windDirectionDegrees: Int,
     val humidityPercent: Int,
-    val pressureHpa: Int
+    val pressureHpa: Int,
+    val cloudinessPercent: Int? // <--- ADDED: Cloudiness in percent
 )
 
 /**

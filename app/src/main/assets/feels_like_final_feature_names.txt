@@ -1,0 +1,15 @@
+num__Temperature (C)
+num__Humidity
+num__Wind Speed (km/h)
+num__Visibility (km)
+num__Pressure (millibars)
+cat__Precip Type_rain
+cat__Precip Type_snow
+remainder__HourSin
+remainder__HourCos
+remainder__MonthSin
+remainder__MonthCos
+remainder__DayOfYearSin
+remainder__DayOfYearCos
+remainder__WindBearingSin
+remainder__WindBearingCos
