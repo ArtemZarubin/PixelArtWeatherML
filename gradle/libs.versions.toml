@@ -5,6 +5,10 @@
 agp = "8.10.0"
 foundation = "1.8.1"
 kotlin = "2.1.20"
+room = "2.7.1"
+ksp = "2.1.20-2.0.1"
+
+navigationCompose = "2.9.0" # Jetpack Compose Navigation
 # The Compose Compiler version must be compatible with the Kotlin version.
 # Checked compatibility: Kotlin 2.1.20 with Compose Compiler X.Y.Z (e.g., 1.5.11 or newer if stable for K2. Starting with Kotlin version 2.0.0 must use Compose Compiler Gradle plugin).
 # Refer to: https://developer.android.com/jetpack/androidx/releases/compose-kotlin
@@ -32,6 +36,9 @@ tensorflowLite = "2.17.0"
 tensorflowLiteSupport = "0.5.0"
 playServicesLocation = "21.3.0"
 protoliteWellKnownTypes = "18.0.1" # Check for the latest version
+googleServicesPlugin = "4.4.2"
+
+androidxMaterialIcons = "1.7.8"
 
 [libraries]
 # AndroidX Core
@@ -81,6 +88,18 @@ tensorflow-lite-support = { group = "org.tensorflow", name = "tensorflow-lite-su
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 protolite-well-known-types = { group = "com.google.firebase", name = "protolite-well-known-types", version.ref = "protoliteWellKnownTypes" }
 
+# Kotlin Room
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+
+# Jetpack Compose Navigation
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+# Icons
+androidx-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core", version.ref = "androidxMaterialIcons" }
+androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "androidxMaterialIcons" }
+
 [plugins]
 # Existing plugins from the project
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -92,3 +111,9 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 hilt-android-gradle = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+
+# KSP Plugin
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+
+# Google Search Plugin
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServicesPlugin" }

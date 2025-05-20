@@ -1,49 +1,33 @@
 package com.artemzarubin.weatherml.data.repository
 
-// Импортируем правильный DTO для компонентов загрязнителей
+// We import the correct DTO for pollutant components
 import android.util.Log
+import com.artemzarubin.weatherml.data.local.SavedLocationDao
 import com.artemzarubin.weatherml.data.mapper.mapToWeatherDataBundle
+import com.artemzarubin.weatherml.data.mapper.toDomainModel
+import com.artemzarubin.weatherml.data.mapper.toDomainModelList
+import com.artemzarubin.weatherml.data.mapper.toEntity
+import com.artemzarubin.weatherml.data.mapper.toEntityList
 import com.artemzarubin.weatherml.data.remote.ApiService
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyFeatureDto
 import com.artemzarubin.weatherml.domain.ml.ModelInput
 import com.artemzarubin.weatherml.domain.ml.WeatherModelInterpreter
+import com.artemzarubin.weatherml.domain.model.SavedLocation
 import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.Resource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
-import java.util.Calendar
-import java.util.TimeZone
 import javax.inject.Inject
 
 class WeatherRepositoryImpl @Inject constructor(
     private val apiService: ApiService,
-    private val modelInterpreter: WeatherModelInterpreter
+    private val modelInterpreter: WeatherModelInterpreter,
+    private val savedLocationDao: SavedLocationDao // <--- INJECTION DAO
 ) : WeatherRepository {
-
-    private val featureOrderFromTraining: List<String> = listOf(
-        "num__Temperature (C)", "num__Humidity", "num__Wind Speed (km/h)",
-        "num__Visibility (km)", "num__Pressure (millibars)",
-        "cat__Precip Type_rain", "cat__Precip Type_snow",
-        "remainder__HourSin", "remainder__HourCos", "remainder__MonthSin",
-        "remainder__MonthCos", "remainder__DayOfYearSin", "remainder__DayOfYearCos",
-        "remainder__WindBearingSin", "remainder__WindBearingCos"
-    )
-
-    // Допоміжна функція для отримання локальної години, місяця та дня року
-    private fun getLocalTimeFeatures(
-        dateTimeMillisUTC: Long,
-        timezoneOffsetSeconds: Int
-    ): Triple<Int, Int, Int> {
-        val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-        calendar.timeInMillis = dateTimeMillisUTC
-        calendar.add(Calendar.SECOND, timezoneOffsetSeconds)
-        val hour = calendar.get(Calendar.HOUR_OF_DAY)
-        val month = calendar.get(Calendar.MONTH) + 1
-        val dayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
-        return Triple(hour, month, dayOfYear)
-    }
 
     override suspend fun getAllWeatherData(
         lat: Double,
@@ -125,22 +109,6 @@ class WeatherRepositoryImpl @Inject constructor(
         }
     }
 
-    private fun getLocalHourAndMonth(
-        dateTimeMillisUTC: Long,
-        timezoneOffsetSeconds: Int
-    ): Pair<Int, Int> {
-        val calendar = Calendar.getInstance(TimeZone.getTimeZone("UTC"))
-        calendar.timeInMillis = dateTimeMillisUTC
-        calendar.add(
-            Calendar.SECOND,
-            timezoneOffsetSeconds
-        ) // Convert to local time of the location
-        val hour = calendar.get(Calendar.HOUR_OF_DAY) // 0-23
-        val month =
-            calendar.get(Calendar.MONTH) + 1    // Month is 0-indexed (0-11), so add 1 for (1-12)
-        return Pair(hour, month)
-    }
-
     override suspend fun getCityAutocompleteSuggestions(
         query: String,
         apiKey: String,
@@ -160,5 +128,66 @@ class WeatherRepositoryImpl @Inject constructor(
                 Resource.Error(message = e.message ?: "Error fetching suggestions")
             }
         }
+    }
+
+    // --- IMPLEMENTATION OF NEW METHODS ---
+
+    override fun getSavedLocations(): Flow<List<SavedLocation>> {
+        return savedLocationDao.getAllSavedLocations().map { entities ->
+            entities.toDomainModelList() // Let's map the Entity to the Domain Model
+        }
+    }
+
+    override fun getCurrentActiveWeatherLocation(): Flow<SavedLocation?> {
+        return savedLocationDao.getCurrentActiveLocation().map { entity ->
+            entity?.toDomainModel() // Map Entity to Domain Model if not null
+        }
+    }
+
+    override suspend fun addSavedLocation(location: SavedLocation): Long {
+        // Check if a location with these coordinates already exists
+        val existingLocation =
+            savedLocationDao.getLocationByCoordinates(location.latitude, location.longitude)
+        if (existingLocation != null) {
+            Log.w(
+                "WeatherRepositoryImpl",
+                "Location already exists with id ${existingLocation.id}. Not adding duplicate."
+            )
+            // Might be worth updating isCurrentLocation to an existing one if needed
+            // setActiveLocation(existingLocation.id)
+            return -2L // Or other code that means "already exists"
+        }
+
+        // If this is the first location, make it active
+        val count = savedLocationDao.getLocationsCount()
+        val entityToInsert = if (count == 0) {
+            location.toEntity().copy(isCurrentLocation = true, orderIndex = 0)
+        } else {
+            location.toEntity()
+                .copy(orderIndex = count) // New locations are added to the end of the list
+        }
+        return savedLocationDao.insertLocation(entityToInsert)
+    }
+
+    override suspend fun setActiveLocation(locationId: Int) {
+        savedLocationDao.setCurrentActiveLocation(locationId)
+    }
+
+    override suspend fun deleteSavedLocation(locationId: Int) {
+        savedLocationDao.deleteLocationById(locationId)
+        // After deletion, if there are no more active locations, you can make the first one in the list active (if the list is not empty)
+        // Or this logic should be in the ViewModel
+    }
+
+    override suspend fun updateSavedLocationsOrder(locations: List<SavedLocation>) {
+        savedLocationDao.updateLocationOrder(locations.toEntityList())
+    }
+
+    override suspend fun hasSavedLocations(): Boolean {
+        return savedLocationDao.getLocationsCount() > 0
+    }
+
+    override suspend fun getSavedLocationById(locationId: Int): SavedLocation? {
+        return savedLocationDao.getLocationById(locationId)?.toDomainModel()
     }
 }

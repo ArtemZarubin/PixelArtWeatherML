@@ -3,6 +3,7 @@ package com.artemzarubin.weatherml.di
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import com.artemzarubin.weatherml.data.local.SavedLocationDao
 import com.artemzarubin.weatherml.data.location.LocationTrackerImpl
 import com.artemzarubin.weatherml.data.ml.WeatherModelInterpreterImpl
 import com.artemzarubin.weatherml.data.remote.ApiService
@@ -83,10 +84,15 @@ object NetworkModule {
     @Singleton
     fun provideWeatherRepository(
         apiService: ApiService,
-        modelInterpreter: WeatherModelInterpreter // <--- ADDING THIS PARAMETER
+        modelInterpreter: WeatherModelInterpreter, // <--- ADDING THIS PARAMETER
+        savedLocationDao: SavedLocationDao
     ): WeatherRepository {
         // Hilt will provide both ApiService and WeatherModelInterpreter
-        return WeatherRepositoryImpl(apiService, modelInterpreter) // <--- PASSING BOTH ARGUMENTS
+        return WeatherRepositoryImpl(
+            apiService,
+            modelInterpreter,
+            savedLocationDao
+        ) // <--- PASSING BOTH ARGUMENTS
     }
 
     @Provides

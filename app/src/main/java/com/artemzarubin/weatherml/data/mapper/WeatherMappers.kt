@@ -2,12 +2,14 @@
 package com.artemzarubin.weatherml.data.mapper
 
 import android.util.Log
+import com.artemzarubin.weatherml.data.local.SavedLocationEntity
 import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastItemDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
 import com.artemzarubin.weatherml.domain.model.CurrentWeather
 import com.artemzarubin.weatherml.domain.model.DailyForecast
 import com.artemzarubin.weatherml.domain.model.HourlyForecast
+import com.artemzarubin.weatherml.domain.model.SavedLocation
 import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -152,4 +154,38 @@ fun mapToWeatherDataBundle(
         hourlyForecasts = hourlyForecastsDomain,
         dailyForecasts = dailyForecastsDomain // This will now have more aggregated daily data
     )
+}
+
+// --- Location Mappers ---
+
+fun SavedLocationEntity.toDomainModel(): SavedLocation {
+    return SavedLocation(
+        id = this.id,
+        cityName = this.cityName,
+        countryCode = this.countryCode,
+        latitude = this.latitude,
+        longitude = this.longitude,
+        isCurrentActive = this.isCurrentLocation,
+        orderIndex = this.orderIndex
+    )
+}
+
+fun SavedLocation.toEntity(): SavedLocationEntity {
+    return SavedLocationEntity(
+        id = this.id, // If id is 0, Room will autoGenerate it on insert
+        cityName = this.cityName,
+        countryCode = this.countryCode,
+        latitude = this.latitude,
+        longitude = this.longitude,
+        isCurrentLocation = this.isCurrentActive,
+        orderIndex = this.orderIndex
+    )
+}
+
+fun List<SavedLocationEntity>.toDomainModelList(): List<SavedLocation> {
+    return this.map { it.toDomainModel() }
+}
+
+fun List<SavedLocation>.toEntityList(): List<SavedLocationEntity> {
+    return this.map { it.toEntity() }
 }

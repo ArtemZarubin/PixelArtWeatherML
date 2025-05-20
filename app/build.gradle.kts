@@ -19,6 +19,7 @@ plugins {
     alias(libs.plugins.hilt.android.gradle)    // Apply Hilt plugin
     alias(libs.plugins.kotlin.serialization)  // Apply Kotlin Serialization plugin
     alias(libs.plugins.kotlin.kapt)           // Apply Kapt plugin
+    alias(libs.plugins.ksp)   // Apply new KSP plugin
 }
 
 android {
@@ -121,6 +122,18 @@ dependencies {
 
     // Location check
     implementation(libs.play.services.location) // For location
+
+    // Room
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.room.ktx)
+
+    // Compose
+    implementation(libs.androidx.navigation.compose)
+
+    // Icons
+    implementation(libs.androidx.material.icons.core)
+    implementation(libs.androidx.material.icons.extended)
 }
 
 // Kapt configuration for Hilt (add to the end of the file if not present)
