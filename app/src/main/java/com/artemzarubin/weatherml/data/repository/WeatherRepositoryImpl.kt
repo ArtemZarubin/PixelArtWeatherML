@@ -26,7 +26,7 @@ import javax.inject.Inject
 class WeatherRepositoryImpl @Inject constructor(
     private val apiService: ApiService,
     private val modelInterpreter: WeatherModelInterpreter,
-    private val savedLocationDao: SavedLocationDao // <--- INJECTION DAO
+    private val savedLocationDao: SavedLocationDao
 ) : WeatherRepository {
 
     override suspend fun getAllWeatherData(
@@ -189,5 +189,39 @@ class WeatherRepositoryImpl @Inject constructor(
 
     override suspend fun getSavedLocationById(locationId: Int): SavedLocation? {
         return savedLocationDao.getLocationById(locationId)?.toDomainModel()
+    }
+
+    override suspend fun getLocationDetailsByCoordinates(
+        lat: Double,
+        lon: Double,
+        apiKey: String
+    ): Resource<GeoapifyFeatureDto?> {
+        return try {
+            val response = apiService.reverseGeocode(
+                latitude = lat,
+                longitude = lon,
+                apiKey = apiKey
+                // type = "city" and lang = "en" are already set by default in ApiService
+            )
+            // Reverse geocoding usually returns one or more nearest addresses/places.
+            // Let's take the first significant one.
+            val firstFeature = response.features?.firstOrNull()
+            if (firstFeature != null) {
+                Log.d(
+                    "WeatherRepositoryImpl",
+                    "Reverse geocoding success: ${firstFeature.properties?.formattedAddress}"
+                )
+                Resource.Success(data = firstFeature)
+            } else {
+                Log.w(
+                    "WeatherRepositoryImpl",
+                    "Reverse geocoding returned no features for $lat, $lon"
+                )
+                Resource.Error(message = "Could not determine location name from coordinates.")
+            }
+        } catch (e: Exception) {
+            Log.e("WeatherRepositoryImpl", "Error during reverse geocoding: ${e.message}", e)
+            Resource.Error(message = e.message ?: "Reverse geocoding failed")
+        }
     }
 }

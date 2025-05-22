@@ -3,6 +3,7 @@ package com.artemzarubin.weatherml.data.remote
 import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyAutocompleteResponseDto
+import com.artemzarubin.weatherml.data.remote.dto.GeoapifyReverseGeocodeResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.GeocodingResponseItemDto
 import retrofit2.http.GET
 import retrofit2.http.Query
@@ -81,11 +82,21 @@ interface ApiService {
      */
     @GET("https://api.geoapify.com/v1/geocode/autocomplete") // Full URL for Geoapify
     suspend fun getCityAutocomplete(
+        @Query("type") type: String = "city",
         @Query("text") text: String,
         @Query("apiKey") apiKey: String,
-        @Query("limit") limit: Int = 7, // Request a few suggestions
+        @Query("limit") limit: Int = 10, // Request a few suggestions
         @Query("lang") lang: String = "en",
         // @Query("type") type: String = "city" // Filter by city type
         // @Query("filter") filter: String? = null // More advanced filtering if needed
     ): GeoapifyAutocompleteResponseDto // New DTO for Geoapify
+
+    @GET("https://api.geoapify.com/v1/geocode/reverse") // Повний URL, оскільки BASE_URL інший
+    suspend fun reverseGeocode(
+        @Query("lat") latitude: Double,
+        @Query("lon") longitude: Double,
+        @Query("type") type: String = "city", // Опціонально, для отримання результатів на рівні міста
+        @Query("lang") language: String = "en", // Мова результатів
+        @Query("apiKey") apiKey: String
+    ): GeoapifyReverseGeocodeResponseDto // Новий DTO для відповіді
 }

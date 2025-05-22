@@ -63,18 +63,16 @@ data class CloudsDto(
 // DTO for the "coord" object
 @Serializable
 data class CoordinatesDto(
-    @SerialName("lon") val lon: Double?,
-    @SerialName("lat") val lat: Double?
+    @SerialName("lon") val longitude: Double?, // <--- МАЄ БУТИ NULLABLE
+    @SerialName("lat") val latitude: Double?
 )
 
 // DTO for the "sys" object in /weather response
 @Serializable
-data class SysDto(
-    @SerialName("type") val type: Int? = null, // Optional
-    @SerialName("id") val id: Int? = null,     // Optional
-    @SerialName("country") val country: String?, // Country code (GB, JP etc.)
-    @SerialName("sunrise") val sunrise: Long?, // Sunrise time, unix, UTC
-    @SerialName("sunset") val sunset: Long?    // Sunset time, unix, UTC
+data class SysDto( // Це частина CurrentWeatherResponseDto
+    @SerialName("country") val country: String?, // Вже nullable, добре
+    @SerialName("sunrise") val sunrise: Long?,
+    @SerialName("sunset") val sunset: Long?
 )
 
 // Optional DTOs for rain and snow (structure might vary, check API for "1h" or "3h" fields)

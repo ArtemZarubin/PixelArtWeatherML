@@ -121,7 +121,7 @@ val AppTypography = Typography(
     ),
     labelLarge = TextStyle(
         fontFamily = DefaultPixelFontFamily,
-        fontWeight = FontWeight.Medium,
+        fontWeight = FontWeight.SemiBold,
         fontSize = 25.sp,
         lineHeight = 32.sp
     ),

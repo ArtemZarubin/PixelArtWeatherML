@@ -55,15 +55,15 @@ data class ForecastSysDto( // System information within a forecast item
 )
 
 @Serializable
-data class CityDto( // Information about the city for the forecast
+data class CityDto( // Це частина ForecastResponseDto
     @SerialName("id") val id: Int?,
     @SerialName("name") val name: String?,
-    @SerialName("coord") val coordinates: CoordinatesDto?, // Reusing CoordinatesDto
-    @SerialName("country") val country: String?, // Country code
+    @SerialName("coord") val coordinates: CoordinatesDto?, // <--- МАЄ БУТИ NULLABLE
+    @SerialName("country") val country: String?,
     @SerialName("population") val population: Int?,
-    @SerialName("timezone") val timezone: Int?, // Shift in seconds from UTC
-    @SerialName("sunrise") val sunrise: Long?, // Sunrise time, Unix, UTC
-    @SerialName("sunset") val sunset: Long?    // Sunset time, Unix, UTC
+    @SerialName("timezone") val timezone: Int?,
+    @SerialName("sunrise") val sunrise: Long?,
+    @SerialName("sunset") val sunset: Long?
 )
 
 // Reusing CoordinatesDto from CurrentWeatherResponseDto.kt if suitable.

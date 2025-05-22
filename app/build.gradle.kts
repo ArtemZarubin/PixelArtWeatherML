@@ -134,6 +134,10 @@ dependencies {
     // Icons
     implementation(libs.androidx.material.icons.core)
     implementation(libs.androidx.material.icons.extended)
+
+    // Pager
+    implementation(libs.androidx.foundation)
+    implementation(libs.androidx.foundation.layout)
 }
 
 // Kapt configuration for Hilt (add to the end of the file if not present)

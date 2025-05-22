@@ -1,6 +1,7 @@
 package com.artemzarubin.weatherml.ui.mainscreen
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -9,6 +10,7 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -38,21 +42,25 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -66,77 +74,136 @@ import com.artemzarubin.weatherml.ui.PixelatedSunLoader
 import com.artemzarubin.weatherml.ui.SimpleHourlyForecastItemView
 import com.artemzarubin.weatherml.ui.SimplifiedDailyForecastItemView
 import com.artemzarubin.weatherml.ui.common.PixelArtCard
+import com.artemzarubin.weatherml.ui.theme.DefaultPixelFontFamily
 import com.artemzarubin.weatherml.util.Resource
+import kotlinx.coroutines.isActive
+import kotlin.coroutines.cancellation.CancellationException
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Функцію виносимо на рівень файлу
+private fun hasLocationPermission(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION
+    ) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun WeatherScreen(
     viewModel: MainViewModel = hiltViewModel(),
     onNavigateToManageCities: () -> Unit
 ) {
-    val weatherBundleState by viewModel.weatherDataState.collectAsState()
-    val autocompleteResultsState by viewModel.autocompleteResults.collectAsState()
-    val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val focusManager = LocalFocusManager.current
+    val pagerItemsList by viewModel.pagerItems.collectAsState()
+    val currentPagerIndexFromVM by viewModel.currentPagerIndex.collectAsState()
+    val weatherDataMap by viewModel.weatherDataStateMap.collectAsState() // Збираємо всю мапу станів
 
+    val pagerState = rememberPagerState(
+        initialPage = currentPagerIndexFromVM.coerceIn(
+            0,
+            (pagerItemsList.size - 1).coerceAtLeast(0)
+        ),
+        pageCount = { pagerItemsList.size }
+    )
+
+    val programmaticScrollInProgress = remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
     var showPermissionRationale by rememberSaveable { mutableStateOf(false) }
     var permissionsRequestedThisSession by rememberSaveable { mutableStateOf(false) }
-    var searchQuery by rememberSaveable { mutableStateOf("") }
-
     val locationPermissions = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
     )
 
+    val weatherDataMapFromVM by viewModel.weatherDataStateMap.collectAsState()
+
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
-            permissionsRequestedThisSession = true
+            // permissionsRequestedThisSession = true
             val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
             val coarseLocationGranted =
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
             if (fineLocationGranted || coarseLocationGranted) {
-                showPermissionRationale = false; viewModel.initiateWeatherFetch()
+                showPermissionRationale = false // Дозволи надано, ховаємо UI помилки
+                permissionsRequestedThisSession = true // Позначимо, що взаємодія була
+                viewModel.handlePermissionGranted()
             } else {
+                permissionsRequestedThisSession = true // Позначимо, що взаємодія була (відмова)
                 val activity = context as? ComponentActivity
-                val userPermanentlyDenied = locationPermissions.any { perm ->
-                    ContextCompat.checkSelfPermission(
-                        context,
-                        perm
-                    ) == PackageManager.PERMISSION_DENIED && activity?.shouldShowRequestPermissionRationale(
-                        perm
-                    ) == false
+                val canRequestAgain = locationPermissions.any { perm ->
+                    activity?.shouldShowRequestPermissionRationale(perm)
+                        ?: false // Якщо false, то "don't ask again"
                 }
-                viewModel.setPermissionError(if (userPermanentlyDenied) "Location permission permanently denied. Please enable it in app settings." else "Location permission denied.")
-                showPermissionRationale = true
+                val isPermanentlyDenied = !canRequestAgain
+
+                viewModel.setPermissionError(
+                    if (isPermanentlyDenied) "Location permission permanently denied. Please enable it in app settings."
+                    else "Location permission denied. Click to try again."
+                )
+                showPermissionRationale = true // Показуємо UI помилки
             }
         }
     )
 
     val lifecycleOwner = LocalLifecycleOwner.current
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
-                val allGranted = locationPermissions.all {
-                    ContextCompat.checkSelfPermission(
-                        context,
-                        it
-                    ) == PackageManager.PERMISSION_GRANTED
-                }
+                Log.d(
+                    "WeatherScreen",
+                    "ON_START. PermRequestedThisSession: $permissionsRequestedThisSession, Current ShowRationale: $showPermissionRationale"
+                )
+                val allGranted = hasLocationPermission(context)
                 if (allGranted) {
-                    showPermissionRationale = false; viewModel.initiateWeatherFetch()
-                } else if (!permissionsRequestedThisSession) {
-                    locationPermissionLauncher.launch(locationPermissions)
-                } else {
-                    showPermissionRationale = true
-                    if (weatherBundleState.message?.contains("permanently denied") != true && weatherBundleState.message?.contains(
-                            "permission denied",
-                            ignoreCase = true
-                        ) != true
-                    ) {
-                        viewModel.setPermissionError("Location permission is needed.")
+                    Log.d("WeatherScreen", "Permissions GRANTED on ON_START.")
+                    if (showPermissionRationale) { // Если UI ошибки разрешений был виден
+                        Log.d(
+                            "WeatherScreen",
+                            "Hiding permission rationale UI as permissions are now granted."
+                        )
+                        showPermissionRationale = false // Скрываем его
                     }
+                    // Всегда вызываем handlePermissionGranted, если разрешения есть при старте,
+                    // чтобы ViewModel мог переинициализировать загрузку геолокации или очистить ошибки.
+                    viewModel.handlePermissionGranted()
+                } else {
+                    // ... остальная логика для случая, когда разрешений НЕТ ...
+                    // Важно: если разрешения были "permanently denied", а пользователь только что вернулся из настроек,
+                    // этот блок (else) не должен выполняться, если allGranted стало true.
+                    Log.d("WeatherScreen", "Permissions NOT GRANTED on ON_START.")
+                    val activity = context as? ComponentActivity
+                    val canRequestAgain = locationPermissions.any { perm ->
+                        activity?.shouldShowRequestPermissionRationale(perm) ?: false
+                    }
+                    // permissionsRequestedThisSession здесь важно, чтобы не показывать "permanently denied" до первого запроса
+                    val isPermanentlyDenied = !canRequestAgain && permissionsRequestedThisSession
+
+                    if (isPermanentlyDenied) {
+                        Log.d("WeatherScreen", "ON_START: Permissions seem permanently denied.")
+                        viewModel.setPermissionError("Location permission permanently denied. Please enable it in app settings.")
+                        showPermissionRationale = true
+                    } else if (permissionsRequestedThisSession && !allGranted) { // Была попытка запроса, но отказали (не перманентно)
+                        Log.d(
+                            "WeatherScreen",
+                            "ON_START: Permissions denied, but not permanently (or rationale pending)."
+                        )
+                        viewModel.setPermissionError("Location permission denied. Click to try again.")
+                        showPermissionRationale = true
+                    } else if (!permissionsRequestedThisSession && !allGranted) { // Еще не запрашивали в этой сессии
+                        Log.d(
+                            "WeatherScreen",
+                            "ON_START: Requesting permissions for the first time this session."
+                        )
+                        locationPermissionLauncher.launch(locationPermissions)
+                    }
+                    // Если showPermissionRationale уже true из-за предыдущего состояния, и разрешения все еще не даны,
+                    // то UI ошибки останется видимым, что корректно.
                 }
             }
         }
@@ -144,41 +211,247 @@ fun WeatherScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    Scaffold(
-        topBar = {
-            if (weatherBundleState is Resource.Success<*>) {
-                (weatherBundleState as Resource.Success<WeatherDataBundle>).data?.let { bundle ->
-                    Surface(
-                        shadowElevation = 3.dp,
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-                    ) {
-                        TopAppBar(
-                            title = {
-                                val displayTitle = bundle.currentWeather.let {
-                                    "${it.cityName}${it.countryCode?.let { code -> ", $code" } ?: ""}"
-                                } // Тепер беремо з bundle.currentWeather, оскільки ми в Success стані
-                                Text(
-                                    text = displayTitle,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+
+
+    LaunchedEffect(currentPagerIndexFromVM, pagerItemsList.size, pagerState.pageCount) {
+        val targetPage = currentPagerIndexFromVM
+        // Используем актуальный размер списка pagerItemsList на момент запуска эффекта
+        val currentListSize = pagerItemsList.size
+
+        if (currentListSize > 0 && targetPage >= 0 && targetPage < currentListSize) {
+            // Проверяем, что pageCount в PagerState уже соответствует актуальному списку
+            // Это важно, чтобы избежать ошибок при скролле к индексу, которого еще нет в PagerState
+            if (pagerState.pageCount == currentListSize) {
+                // Проверяем, нужно ли вообще скроллить
+                if (pagerState.currentPage != targetPage || pagerState.settledPage != targetPage) {
+                    Log.d(
+                        "WeatherScreen",
+                        "VM wants page $targetPage. Pager at ${pagerState.currentPage} (settled: ${pagerState.settledPage}). Programmatic scroll starting."
+                    )
+                    programmaticScrollInProgress.value =
+                        true // Устанавливаем флаг ПЕРЕД началом скролла
+                    try {
+                        if (isActive) { // Убедимся, что корутина все еще активна
+                            pagerState.animateScrollToPage(targetPage)
+                            // Анимация завершена (или прервана), settledPage должен обновиться
+                            Log.d(
+                                "WeatherScreen",
+                                "Programmatic scroll animateScrollToPage($targetPage) attempt finished."
+                            )
+                        } else {
+                            Log.w(
+                                "WeatherScreen",
+                                "Programmatic scroll to $targetPage skipped: coroutine not active."
+                            )
+                        }
+                    } catch (e: CancellationException) {
+                        Log.w("WeatherScreen", "Scroll animation to $targetPage was CANCELLED.")
+                        // Флаг будет сброшен в finally
+                    } catch (e: Exception) {
+                        Log.e(
+                            "WeatherScreen",
+                            "Error animating scroll to page $targetPage: ${e.message}"
+                        )
+                        // Попытка неанимированного скролла в случае ошибки анимации
+                        if (isActive && targetPage < pagerState.pageCount) { // Проверяем isActive и границы
+                            try {
+                                Log.d(
+                                    "WeatherScreen",
+                                    "Attempting non-animated scroll to $targetPage due to animation error."
                                 )
-                            },
-                            actions = {
-                                IconButton(onClick = onNavigateToManageCities) {
-                                    Image( // <--- ЗАМІНА ICON НА IMAGE
-                                        painter = painterResource(id = R.drawable.list_option),
-                                        contentDescription = "Manage Locations",
-                                        modifier = Modifier.size(32.dp),
-                                        colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(
-                                            MaterialTheme.colorScheme.onBackground
-                                        )
-                                    )
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                                pagerState.scrollToPage(targetPage)
+                                Log.d(
+                                    "WeatherScreen",
+                                    "Fallback non-animated scroll to $targetPage successful."
+                                )
+                            } catch (e2: Exception) {
+                                Log.e(
+                                    "WeatherScreen",
+                                    "Fallback scrollToPage to $targetPage also failed: ${e2.message}"
+                                )
+                            }
+                        }
+                    } finally {
+                        // Важно: сбрасываем флаг ПОСЛЕ того, как PagerState имел шанс "устаканиться"
+                        // Однако, если animateScrollToPage отменяется, settledPage может не сразу обновиться.
+                        // Логика в другом LaunchedEffect (на settledPage) должна это учесть.
+                        // Здесь мы просто сигнализируем, что *попытка* программного скролла завершена.
+                        if (programmaticScrollInProgress.value) { // Сбрасываем, только если мы его установили
+                            Log.d(
+                                "WeatherScreen",
+                                "Programmatic scroll attempt to $targetPage ended. Resetting flag: ${programmaticScrollInProgress.value} -> false"
+                            )
+                            programmaticScrollInProgress.value = false
+                        }
+                    }
+                } else {
+                    Log.d(
+                        "WeatherScreen",
+                        "VM wants page $targetPage. Pager already at $targetPage (currentPage: ${pagerState.currentPage}, settledPage: ${pagerState.settledPage}). No scroll needed."
+                    )
+                    // Если мы уже на нужной странице, и флаг был установлен ранее (маловероятно, но для чистоты), сбросим его.
+                    if (programmaticScrollInProgress.value) {
+                        programmaticScrollInProgress.value = false
+                        Log.d(
+                            "WeatherScreen",
+                            "Resetting programmatic scroll flag as already on target page."
                         )
                     }
+                }
+            } else {
+                Log.w(
+                    "WeatherScreen",
+                    "VM wants page $targetPage. pagerState.pageCount (${pagerState.pageCount}) != currentListSize ($currentListSize). Scroll deferred or might fail."
+                )
+                // Если pageCount не совпадает, скролл не будет выполнен, поэтому флаг не должен оставаться true.
+                if (programmaticScrollInProgress.value) {
+                    programmaticScrollInProgress.value = false
+                    Log.d(
+                        "WeatherScreen",
+                        "Resetting programmatic scroll flag due to pageCount mismatch."
+                    )
+                }
+            }
+        } else if (currentListSize == 0) {
+            Log.d(
+                "WeatherScreen",
+                "VM wants page $targetPage, but pagerItemsList is empty. No scroll action."
+            )
+            if (programmaticScrollInProgress.value) { // Если список стал пустым во время попытки скролла
+                programmaticScrollInProgress.value = false
+                Log.d("WeatherScreen", "Resetting programmatic scroll flag as list became empty.")
+            }
+        } else { // targetPage за пределами currentListSize
+            Log.w(
+                "WeatherScreen",
+                "VM wants page $targetPage, which is out of bounds for list size $currentListSize. No scroll action."
+            )
+            if (programmaticScrollInProgress.value) {
+                programmaticScrollInProgress.value = false
+                Log.d(
+                    "WeatherScreen",
+                    "Resetting programmatic scroll flag due to out-of-bounds target."
+                )
+            }
+        }
+    }
+
+    // Эффект для синхронизации PagerState -> ViewModel (когда пользователь свайпает или программный скролл завершается)
+    // Реагируем только на изменение pagerState.settledPage
+    LaunchedEffect(pagerState.settledPage) {
+        val settledPage = pagerState.settledPage
+        // Получаем актуальный индекс из ViewModel для сравнения
+        val vmCurrentIndex = viewModel.currentPagerIndex.value
+
+        Log.d(
+            "WeatherScreen",
+            "Pager settled at $settledPage. VM index: $vmCurrentIndex. Programmatic scroll flag: ${programmaticScrollInProgress.value}"
+        )
+
+        // Если флаг programmaticScrollInProgress.value == true, это означает, что
+        // ViewModel -> PagerState эффект все еще считает, что он управляет скроллом.
+        // Мы НЕ должны вызывать onPageChanged, так как это может быть промежуточное settledPage
+        // во время анимации, инициированной ViewModel, или состояние сразу после отмены.
+        // Флаг будет сброшен в finally того эффекта.
+        if (programmaticScrollInProgress.value) {
+            Log.d(
+                "WeatherScreen",
+                "Programmatic scroll is (or was just) in progress. Ignoring this settledPage ($settledPage) change to avoid loop with VM index $vmCurrentIndex."
+            )
+            // Если settledPage совпадает с тем, куда мы программно скроллили (vmCurrentIndex),
+            // и флаг все еще true, это нормально, он скоро сбросится.
+            // Если не совпадает, значит скролл был прерван/не удался, флаг тоже скоро сбросится.
+            // В любом случае, ждем сброса флага, прежде чем реагировать на settledPage.
+            return@LaunchedEffect
+        }
+
+        // Если programmaticScrollInProgress.value == false, значит:
+        // 1. Программного скролла не было, и это действие пользователя.
+        // 2. Программный скролл был, но он уже полностью завершился (включая блок finally и сброс флага).
+        //    Теперь мы можем безопасно обработать settledPage.
+        if (pagerItemsList.isNotEmpty() && settledPage >= 0 && settledPage < pagerItemsList.size) {
+            if (settledPage != vmCurrentIndex) {
+                Log.d(
+                    "WeatherScreen",
+                    "User action OR post-programmatic settle: Pager settled at $settledPage (VM index $vmCurrentIndex). Informing ViewModel."
+                )
+                viewModel.onPageChanged(settledPage)
+            } else {
+                Log.d(
+                    "WeatherScreen",
+                    "Settled page $settledPage matches VM index ($vmCurrentIndex) and programmatic scroll flag is false. No action to ViewModel needed."
+                )
+            }
+        } else if (pagerItemsList.isEmpty() && settledPage == 0) {
+            Log.d(
+                "WeatherScreen",
+                "Pager settled at page 0, list is empty (and programmatic scroll flag is false). No action to VM."
+            )
+        } else if (settledPage >= pagerItemsList.size && pagerItemsList.isNotEmpty()) {
+            Log.w(
+                "WeatherScreen",
+                "Settled page $settledPage is out of bounds (${pagerItemsList.size}) (and programmatic scroll flag is false). This shouldn't happen."
+            )
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            val currentActiveItem by viewModel.currentActivePagerItem.collectAsState()
+            val weatherDataMapValue by viewModel.weatherDataStateMap.collectAsState()
+
+            val displayTitle = currentActiveItem?.displayName ?: "WeatherML"
+            val currentItemId = currentActiveItem?.id
+            val weatherStateForCurrentPage = weatherDataMapValue[currentItemId]
+
+            // Визначаємо, чи можна показувати TopAppBar
+            val canShowTopBar = when {
+                showPermissionRationale -> false // Якщо показуємо UI помилки дозволів, TopAppBar не потрібен
+                currentActiveItem == null -> false // Якщо немає активної сторінки (наприклад, при першому запуску до ініціалізації)
+                currentActiveItem is PagerItem.GeolocationPage && (currentActiveItem as PagerItem.GeolocationPage).isLoadingDetails -> {
+                    // Якщо це геолокаційна сторінка і для неї ще завантажуються деталі (назва міста)
+                    // Можна вирішити, чи показувати TopAppBar з "Loading location..." чи ні.
+                    // Для чистоти, давай поки що не будемо показувати.
+                    false
+                }
+
+                weatherStateForCurrentPage is Resource.Error && weatherStateForCurrentPage.message?.contains(
+                    "permission",
+                    ignoreCase = true
+                ) == true -> {
+                    // Якщо помилка дозволів для поточної сторінки (малоймовірно тут, бо є showPermissionRationale)
+                    false
+                }
+                // В інших випадках (є активна сторінка, деталі завантажені, погода завантажується або успішна) - показуємо
+                else -> true
+            }
+
+            if (canShowTopBar) {
+                Surface(
+                    shadowElevation = 3.dp,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                ) {
+                    TopAppBar(
+                        title = {
+                            Text(
+                                displayTitle,
+                                style = MaterialTheme.typography.headlineSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        actions = {
+                            IconButton(onClick = onNavigateToManageCities) {
+                                Image(
+                                    painter = painterResource(id = R.drawable.list_option),
+                                    contentDescription = "Manage Locations",
+                                    modifier = Modifier.size(32.dp),
+                                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+                    )
                 }
             }
         },
@@ -189,215 +462,302 @@ fun WeatherScreen(
                 .fillMaxSize()
                 .padding(scaffoldPaddingValues)
         ) {
-            // --- UI Display Logic based on weatherBundleState ---
-            when (val currentContentState = weatherBundleState) {
-                is Resource.Loading<*> -> {
+            // Визначаємо, чи потрібно показувати UI помилки дозволів
+            val geoPageId = PagerItem.GeolocationPage().id
+            val permissionErrorMessageFromState =
+                (weatherDataMap[geoPageId] as? Resource.Error)?.message
+                    ?: (weatherDataMap["initial_perm_error"] as? Resource.Error)?.message
+                    // Додай сюди ключ, який використовується в viewModel.setPermissionError, якщо він інший
+                    ?: (weatherDataMap["permission_denied_key"] as? Resource.Error)?.message
+
+
+            if (showPermissionRationale && permissionErrorMessageFromState?.contains(
+                    "permission",
+                    ignoreCase = true
+                ) == true
+            ) {
+                PermissionErrorUI(
+                    message = permissionErrorMessageFromState, // Це вже String
+                    onGrantPermission = {
+                        // permissionsRequestedThisSession = false // Можна прибрати, якщо логіка в onResult лаунчера працює
+                        locationPermissionLauncher.launch(locationPermissions)
+                    },
+                    onOpenSettings = {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                        val uri = Uri.fromParts("package", context.packageName, null)
+                        intent.data = uri
+                        try {
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Log.e("WeatherScreen", "Could not open app settings", e)
+                        }
+                        showPermissionRationale = false // Скидаємо після переходу в налаштування
+                    },
+                    context = context,
+                    isPermanentlyDenied = permissionErrorMessageFromState.contains(
+                        "permanently denied",
+                        ignoreCase = true
+                    )
+                )
+            } else if (pagerItemsList.isEmpty()) {
+                // Дозволи є (бо showPermissionRationale = false), але список сторінок порожній
+                // Це означає, що геолокація ще завантажується або сталася інша помилка
+                val loadingOrOtherErrorState = weatherDataMap[geoPageId]
+                    ?: Resource.Loading(message = "Initializing location...")
+
+                if (loadingOrOtherErrorState is Resource.Loading || (loadingOrOtherErrorState is Resource.Error && loadingOrOtherErrorState.message?.contains(
+                        "permission"
+                    ) != true)
+                ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             PixelatedSunLoader()
-                            Spacer(modifier = Modifier.height(16.dp))
-                            currentContentState.message?.let { messageText -> // Дамо змінній ім'я, щоб було зрозуміліше
-                                Text(
-                                    text = messageText, // Використовуємо message з Resource.Loading
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    textAlign = TextAlign.Justify, // <--- ВСТАНОВЛЮЄМО ЦЕНТРУВАННЯ
-                                    modifier = Modifier.padding(horizontal = 32.dp) // Додаємо горизонтальні відступи, щоб довгий текст переносився і центрувався
-                                )
-                            }
-                        }
-                    }
-                }
-
-                is Resource.Error<*> -> {
-                    if (!(showPermissionRationale && currentContentState.message?.contains(
-                            "permission",
-                            ignoreCase = true
-                        ) == true)
-                    ) {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
                             Text(
-                                "Error: ${currentContentState.message ?: "Unknown error"}",
-                                style = MaterialTheme.typography.bodyLarge,
-                                textAlign = TextAlign.Justify,
-                                modifier = Modifier.padding(16.dp)
+                                (loadingOrOtherErrorState as? Resource.Loading)?.message
+                                    ?: "Fetching your location...",
+                                modifier = Modifier.padding(top = 8.dp),
+                                textAlign = TextAlign.Center
                             )
                         }
                     }
-                    // Permission error UI with button is handled by the overlay Box at the end
+                } else if (loadingOrOtherErrorState is Resource.Error) { // Інша помилка
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            loadingOrOtherErrorState.message ?: "Failed to load location.",
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
                 }
-
-                is Resource.Success<*> -> {
-                    val bundle = currentContentState.data
-                    if (bundle != null) { // Show weather content only if not in search mode
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState())
-                                .padding(
-                                    horizontal = 16.dp,
-                                    vertical = 8.dp
-                                ), // Adjusted vertical padding
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            // CityHeaderSection is effectively replaced by TopAppBar content
-                            // --- Current Weather Main Info Section ---
-                            CurrentWeatherMainSection(currentWeather = bundle.currentWeather) // This will no longer contain city name
-
-                            // --- Hourly Forecast Section ---
-                            PixelArtCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                internalPadding = 8.dp,
-                                borderWidth = 2.dp
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        "Hourly Forecast (Next 24 Hours)",
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
-                                    )
-                                    if (bundle.hourlyForecasts.isEmpty()) {
-                                        Text(
-                                            "Hourly forecast data is currently unavailable.",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.padding(vertical = 8.dp)
-                                        )
-                                    } else {
-                                        LazyRow(
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                            modifier = Modifier.padding(horizontal = 4.dp)
-                                        ) {
-                                            items(bundle.hourlyForecasts) {
-                                                SimpleHourlyForecastItemView(
-                                                    it
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // --- Daily Forecast Section ---
-                            PixelArtCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                internalPadding = 8.dp,
-                                borderWidth = 2.dp
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(
-                                        "Daily Forecast (Next ${bundle.dailyForecasts.size} Days)",
-                                        style = MaterialTheme.typography.headlineSmall,
-                                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
-                                    )
-                                    if (bundle.dailyForecasts.isEmpty()) {
-                                        Text(
-                                            "Daily forecast data is currently unavailable.",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            modifier = Modifier.padding(vertical = 8.dp)
-                                        )
-                                    } else {
-                                        Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-                                            bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
-                                                SimplifiedDailyForecastItemView(
-                                                    dailyItem
-                                                ); if (index < bundle.dailyForecasts.size - 1) {
-                                                HorizontalDivider(
-                                                    color = MaterialTheme.colorScheme.outline.copy(
-                                                        alpha = 0.5f
-                                                    )
-                                                )
-                                            }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // --- Current Weather Details Section ---
-                            PixelArtCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                internalPadding = 16.dp,
-                                borderWidth = 2.dp
-                            ) {
-                                CurrentWeatherDetailsSection(currentWeather = bundle.currentWeather)
-                            }
+            } else {
+                // Дозволи є, showPermissionRationale = false, і є сторінки для пейджера
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { pageIndex ->
+                    val pagerItem = pagerItemsList.getOrNull(pageIndex)
+                    if (pagerItem != null) {
+                        val weatherStateForThisPage by remember(pagerItem.id, weatherDataMap) {
+                            derivedStateOf { weatherDataMap[pagerItem.id] ?: Resource.Loading() }
                         }
+                        WeatherPageContent(
+                            weatherState = weatherStateForThisPage,
+                            isGeolocationPageAndLoadingDetails = (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails)
+                        )
                     } else {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "Weather data is currently unavailable.",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                        }
+                        ) { Text("Loading page data...") }
                     }
                 }
             }
+        }
+    }
+}
 
-            // --- Permission Error UI Overlay (should be the topmost if active and search is not active) ---
-            if (weatherBundleState is Resource.Error &&
-                weatherBundleState.message?.contains("permission", ignoreCase = true) == true &&
-                showPermissionRationale
+@Composable
+fun WeatherPageContent(
+    weatherState: Resource<WeatherDataBundle>,
+    isGeolocationPageAndLoadingDetails: Boolean = false
+) {
+    if (isGeolocationPageAndLoadingDetails) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f)) // Напівпрозорий фон
+                PixelatedSunLoader()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Fetching location details...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
+        }
+        return
+    }
+
+    when (weatherState) { // ВИПРАВЛЕНО: використовуємо weatherState
+        is Resource.Loading<*> -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    PixelatedSunLoader(); Spacer(modifier = Modifier.height(16.dp))
+                    weatherState.message?.let { messageText -> // ВИПРАВЛЕНО
                         Text(
-                            "Error: ${weatherBundleState.message}",
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Justify,
-                            modifier = Modifier.fillMaxWidth()
+                            text = messageText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center, // Змінено на Center
+                            modifier = Modifier.padding(horizontal = 32.dp)
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        val isPermanentlyDenied =
-                            weatherBundleState.message!!.contains("permanently denied")
-                        Button(
-                            onClick = {
-                                if (isPermanentlyDenied) {
-                                    // Open app settings
-                                    val intent =
-                                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                                    val uri = Uri.fromParts("package", context.packageName, null)
-                                    intent.data = uri
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Log.e("WeatherScreen", "Could not open app settings", e)
-                                    }
-                                } else {
-                                    // Retry permission request
-                                    locationPermissionLauncher.launch(locationPermissions)
-                                }
-                                showPermissionRationale = false // Сховуємо це UI після дії
-                            },
-                            shape = RoundedCornerShape(4.dp), // Твій піксельний стиль
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                        ) {
-                            Text(
-                                if (isPermanentlyDenied) "Open Settings" else "Grant Permission", // Змінено текст кнопки
-                                style = MaterialTheme.typography.headlineSmall // Або інший відповідний стиль
-                            )
-                        }
                     }
                 }
-            } // End of main screen Box (content of Scaffold)
-        } // End of Scaffold
+            }
+        }
+
+        is Resource.Error<*> -> {
+            // Тут не потрібно перевіряти showPermissionRationale, оскільки PermissionErrorUI обробляється окремо
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    "Error: ${weatherState.message ?: "Unknown error"}", // ВИПРАВЛЕНО
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center, // Змінено на Center
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
+        }
+
+        is Resource.Success<*> -> {
+            val bundle = weatherState.data // ВИПРАВЛЕНО
+            if (bundle != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CurrentWeatherMainSection(currentWeather = bundle.currentWeather)
+                    // --- Hourly Forecast Section ---
+                    PixelArtCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        internalPadding = 8.dp,
+                        borderWidth = 2.dp
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                "Hourly Forecast (Next 24 Hours)",
+                                style = MaterialTheme.typography.headlineSmall,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                            )
+                            if (bundle.hourlyForecasts.isEmpty()) {
+                                Text(
+                                    "Hourly forecast data is currently unavailable.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            } else {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 4.dp)
+                                ) {
+                                    items(bundle.hourlyForecasts) {
+                                        SimpleHourlyForecastItemView(
+                                            it
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    PixelArtCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        internalPadding = 8.dp,
+                        borderWidth = 2.dp
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Daily Forecast")
+                            if (bundle.dailyForecasts.isEmpty()) {
+                                Text(
+                                    "Daily forecast data is currently unavailable.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                                )
+                            } else {
+                                // ВИПРАВЛЕНО: Використовуємо Column з forEach для денного прогнозу
+                                Column {
+                                    bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
+                                        SimplifiedDailyForecastItemView(dailyItem)
+                                        if (index < bundle.dailyForecasts.size - 1) {
+                                            HorizontalDivider(
+                                                color = MaterialTheme.colorScheme.outline.copy(
+                                                    alpha = 0.5f
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // --- Current Weather Details Section ---
+                    PixelArtCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        internalPadding = 16.dp,
+                        borderWidth = 2.dp
+                    ) {
+                        CurrentWeatherDetailsSection(currentWeather = bundle.currentWeather)
+                    }
+                }
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Weather data is currently unavailable.",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PermissionErrorUI(
+    message: String,
+    onGrantPermission: () -> Unit,
+    onOpenSettings: () -> Unit,
+    context: Context,
+    isPermanentlyDenied: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background.copy(alpha = 0.98f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Justify,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    if (isPermanentlyDenied) {
+                        onOpenSettings()
+                    } else {
+                        onGrantPermission()
+                    }
+                },
+                shape = RoundedCornerShape(4.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Text(
+                    if (isPermanentlyDenied) "Open Settings" else "Grant Permission",
+                    fontFamily = DefaultPixelFontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 19.sp, // Adjusted for pixel font
+                    lineHeight = 28.sp
+                )
+            }
+        }
     }
 }

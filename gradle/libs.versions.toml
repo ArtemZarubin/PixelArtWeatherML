@@ -3,7 +3,7 @@
 [versions]
 # Android Gradle Plugin and Kotlin versions are derived from the current project setup.
 agp = "8.10.0"
-foundation = "1.8.1"
+foundationPager = "1.0.0-alpha07"
 kotlin = "2.1.20"
 room = "2.7.1"
 ksp = "2.1.20-2.0.1"
@@ -17,7 +17,7 @@ navigationCompose = "2.9.0" # Jetpack Compose Navigation
 coreKtx = "1.16.0"
 lifecycle = "2.9.0"
 activityCompose = "1.10.1"
-composeBom = "2025.05.00" # Using the May 2025 Compose Bill of Materials.
+composeBom = "2025.05.01" # Using the May 2025 Compose Bill of Materials.
 
 # Testing Libraries - Current project versions.
 junit = "4.13.2"
@@ -40,10 +40,12 @@ googleServicesPlugin = "4.4.2"
 
 androidxMaterialIcons = "1.7.8"
 
+# Pager
+androidxComposeFoundation = "1.8.2"
+
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
-androidx-foundation = { module = "androidx.compose.foundation:foundation", version.ref = "foundation" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
 
@@ -99,6 +101,11 @@ androidx-navigation-compose = { group = "androidx.navigation", name = "navigatio
 # Icons
 androidx-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core", version.ref = "androidxMaterialIcons" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "androidxMaterialIcons" }
+
+# Pager
+androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "androidxComposeFoundation" }
+androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "androidxComposeFoundation" }
+
 
 [plugins]
 # Existing plugins from the project

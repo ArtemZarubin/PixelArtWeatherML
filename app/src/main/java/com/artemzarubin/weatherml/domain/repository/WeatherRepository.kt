@@ -91,4 +91,17 @@ interface WeatherRepository {
      * Gets a specific saved location by its ID.
      */
     suspend fun getSavedLocationById(locationId: Int): SavedLocation?
+
+    /**
+     * Fetches address/location details (like city name, country) for given coordinates.
+     * @param lat Latitude.
+     * @param lon Longitude.
+     * @param apiKey The API key for the reverse geocoding service.
+     * @return A Resource wrapper containing the primary [GeoapifyFeatureDto] on success, or an error.
+     */
+    suspend fun getLocationDetailsByCoordinates(
+        lat: Double,
+        lon: Double,
+        apiKey: String
+    ): Resource<GeoapifyFeatureDto?>
 }
