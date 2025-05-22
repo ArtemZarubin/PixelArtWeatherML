@@ -160,6 +160,9 @@ class MainViewModel @Inject constructor(
     private var autocompleteJob: Job? = null
     private var initialSetupFlowCompleted = false // Для керування початковим налаштуванням
 
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     init {
         Log.d("MainViewModel", "ViewModel initialized.")
         observeActivePagerItemToFetchWeather() // Запускаем наблюдателя за погодой
@@ -1132,6 +1135,91 @@ class MainViewModel @Inject constructor(
                     "MainViewModel",
                     "Timeout or error waiting for pagerItems to update for ${savedLocation.cityName}",
                     e
+                )
+            }
+        }
+    }
+
+    // Метод, який викликається при Pull-to-Refresh
+    fun refreshCurrentPageWeather() {
+        viewModelScope.launch {
+            val currentItem = currentActivePagerItem.value ?: run {
+                if (_isRefreshing.value) _isRefreshing.value = false
+                Log.w("MainViewModel", "Refresh: currentActivePagerItem is null, exiting.")
+                return@launch
+            }
+
+            Log.i(
+                "MainViewModel",
+                "Pull-to-refresh triggered for: ${currentItem.displayName} (ID: ${currentItem.id})"
+            )
+            _isRefreshing.value = true
+
+            val itemId = currentItem.id
+
+            try {
+                if (currentItem is PagerItem.GeolocationPage) {
+                    Log.d(
+                        "MainViewModel",
+                        "Refresh: Handling GeolocationPage. Setting weather state to Loading for $itemId before fetching details."
+                    )
+                    // <<< ИЗМЕНЕНИЕ ЗДЕСЬ >>>
+                    // Принудительно устанавливаем состояние Resource.Loading для геолокационной страницы.
+                    // Это гарантирует, что последующее ожидание в .first { ... } будет ждать
+                    // завершения НОВОГО цикла загрузки погоды, инициированного fetchDetailsForGeolocationPage -> observeActivePagerItemToFetchWeather.
+                    _weatherDataStateMap.update { currentMap ->
+                        currentMap.toMutableMap().apply {
+                            this[itemId] =
+                                Resource.Loading(message = "Refreshing location and weather...")
+                        }.toMap()
+                    }
+                    // Теперь вызываем fetchDetailsForGeolocationPage.
+                    // Она обновит детали, а изменение isLoadingDetails в _geolocationPagerItemState
+                    // должно через observeActivePagerItemToFetchWeather запустить fetchWeatherDataForPagerItem,
+                    // которая снова установит Loading, а затем Success/Error.
+                    fetchDetailsForGeolocationPage()
+                } else { // Для сохраненной страницы (PagerItem.SavedPage)
+                    Log.d(
+                        "MainViewModel",
+                        "Refresh: Handling SavedPage. Calling fetchWeatherDataForPagerItem for ${itemId}."
+                    )
+                    // fetchWeatherDataForPagerItem сама установит Resource.Loading в начале своей работы.
+                    fetchWeatherDataForPagerItem(currentItem)
+                }
+
+                Log.d(
+                    "MainViewModel",
+                    "Refresh: Waiting for weather data for $itemId to finish loading (i.e., not be in Loading state). Current state before wait: ${_weatherDataStateMap.value[itemId]?.javaClass?.simpleName}"
+                )
+
+                _weatherDataStateMap.first { stateMap ->
+                    val weatherResource = stateMap[itemId]
+                    val isLoading = weatherResource is Resource.Loading
+                    // Добавим более подробный лог внутри .first для отладки
+                    Log.v(
+                        "MainViewModel_RefreshWait",
+                        "Checking state for $itemId: ${weatherResource?.javaClass?.simpleName}. IsLoading: $isLoading. Message: ${(weatherResource as? Resource.Loading)?.message ?: (weatherResource as? Resource.Error)?.message}"
+                    )
+                    weatherResource != null && !isLoading // Ждем, пока состояние не перестанет быть Loading
+                }
+
+                val finalState = _weatherDataStateMap.value[itemId]
+                Log.i(
+                    "MainViewModel",
+                    "Refresh: Weather data loading finished for $itemId. Final state: ${finalState?.javaClass?.simpleName}"
+                )
+
+            } catch (e: Exception) {
+                Log.e(
+                    "MainViewModel",
+                    "Exception during pull-to-refresh waiting logic for $itemId",
+                    e
+                )
+            } finally {
+                _isRefreshing.value = false
+                Log.i(
+                    "MainViewModel",
+                    "Pull-to-refresh finalized. _isRefreshing set to false for: ${currentItem.displayName}"
                 )
             }
         }

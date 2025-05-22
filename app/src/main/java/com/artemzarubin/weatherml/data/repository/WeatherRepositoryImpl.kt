@@ -15,18 +15,21 @@ import com.artemzarubin.weatherml.domain.ml.WeatherModelInterpreter
 import com.artemzarubin.weatherml.domain.model.SavedLocation
 import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
+import com.artemzarubin.weatherml.util.ConnectivityObserver
 import com.artemzarubin.weatherml.util.Resource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import javax.inject.Inject
 
 class WeatherRepositoryImpl @Inject constructor(
     private val apiService: ApiService,
     private val modelInterpreter: WeatherModelInterpreter,
-    private val savedLocationDao: SavedLocationDao
+    private val savedLocationDao: SavedLocationDao,
+    private val connectivityObserver: ConnectivityObserver
 ) : WeatherRepository {
 
     override suspend fun getAllWeatherData(
@@ -34,6 +37,9 @@ class WeatherRepositoryImpl @Inject constructor(
         lon: Double,
         apiKey: String
     ): Resource<WeatherDataBundle> {
+        if (!connectivityObserver.isNetworkAvailable()) { // <--- ПЕРЕВІРКА
+            return Resource.Error("No internet connection. Please check your network settings.")
+        }
         return withContext(Dispatchers.IO) {
             try {
                 val currentWeatherDeferred = async {
@@ -104,7 +110,14 @@ class WeatherRepositoryImpl @Inject constructor(
                 Resource.Success(data = weatherDataBundle)
             } catch (e: Exception) {
                 Log.e("WeatherRepositoryImpl", "Error in getAllWeatherData: ${e.message}", e)
-                Resource.Error(message = e.message ?: "An unknown error occurred")
+
+                if (e is IOException) {
+                    Resource.Error("Network error: Could not fetch weather data. Please try again.")
+                } else {
+                    Resource.Error(
+                        e.message ?: "An unknown error occurred while fetching weather data."
+                    )
+                }
             }
         }
     }
@@ -114,18 +127,20 @@ class WeatherRepositoryImpl @Inject constructor(
         apiKey: String,
         limit: Int
     ): Resource<List<GeoapifyFeatureDto>> {
+        if (!connectivityObserver.isNetworkAvailable()) { // <--- ПЕРЕВІРКА
+            return Resource.Error("No internet connection. Cannot search for cities.")
+        }
         return withContext(Dispatchers.IO) {
             try {
                 val response =
                     apiService.getCityAutocomplete(text = query, apiKey = apiKey, limit = limit)
                 Resource.Success(data = response.features ?: emptyList())
             } catch (e: Exception) {
-                Log.e(
-                    "WeatherRepositoryImpl",
-                    "Error fetching city suggestions: ${e.message}",
-                    e
-                )
-                Resource.Error(message = e.message ?: "Error fetching suggestions")
+                if (e is IOException) {
+                    Resource.Error("Network error: Could not search for cities.")
+                } else {
+                    Resource.Error(e.message ?: "Error fetching city suggestions")
+                }
             }
         }
     }
@@ -196,6 +211,9 @@ class WeatherRepositoryImpl @Inject constructor(
         lon: Double,
         apiKey: String
     ): Resource<GeoapifyFeatureDto?> {
+        if (!connectivityObserver.isNetworkAvailable()) { // <--- ПЕРЕВІРКА
+            return Resource.Error("No internet connection. Cannot get location details.")
+        }
         return try {
             val response = apiService.reverseGeocode(
                 latitude = lat,
@@ -220,8 +238,11 @@ class WeatherRepositoryImpl @Inject constructor(
                 Resource.Error(message = "Could not determine location name from coordinates.")
             }
         } catch (e: Exception) {
-            Log.e("WeatherRepositoryImpl", "Error during reverse geocoding: ${e.message}", e)
-            Resource.Error(message = e.message ?: "Reverse geocoding failed")
+            if (e is IOException) {
+                Resource.Error("Network error: Could not get location details.")
+            } else {
+                Resource.Error(e.message ?: "Reverse geocoding failed")
+            }
         }
     }
 }

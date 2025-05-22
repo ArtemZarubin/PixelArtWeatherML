@@ -11,6 +11,8 @@
     <!-- For precise location (GPS and network-based) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:name=".WeatherMLApplication"
         android:allowBackup="false"

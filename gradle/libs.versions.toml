@@ -43,6 +43,8 @@ androidxMaterialIcons = "1.7.8"
 # Pager
 androidxComposeFoundation = "1.8.2"
 
+composeMaterial = "1.2.0-alpha02"
+
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -106,6 +108,8 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "androidxComposeFoundation" }
 androidx-foundation-layout = { group = "androidx.compose.foundation", name = "foundation-layout", version.ref = "androidxComposeFoundation" }
 
+
+androidx-compose-material = { group = "androidx.compose.material", name = "material", version.ref = "composeMaterial" }
 
 [plugins]
 # Existing plugins from the project

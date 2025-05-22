@@ -16,19 +16,26 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +59,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +67,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -91,7 +100,38 @@ private fun hasLocationPermission(context: Context): Boolean {
             ) == PackageManager.PERMISSION_GRANTED
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+// Кастомний Composable для PageIndicator
+@Composable
+fun PageIndicator(
+    numberOfPages: Int,
+    currentPage: Int,
+    modifier: Modifier = Modifier,
+    activeColor: Color = MaterialTheme.colorScheme.primary,
+    inactiveColor: Color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+    indicatorSize: Dp = 8.dp,
+    spacing: Dp = 8.dp
+) {
+    Row(
+        modifier = modifier.wrapContentHeight(), // Висота за вмістом
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0 until numberOfPages) {
+            Box(
+                modifier = Modifier
+                    .size(indicatorSize)
+                    .clip(CircleShape) // Робимо індикатори круглими
+                    .background(if (i == currentPage) activeColor else inactiveColor)
+            )
+        }
+    }
+}
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalMaterialApi::class
+)
 @Composable
 fun WeatherScreen(
     viewModel: MainViewModel = hiltViewModel(),
@@ -395,6 +435,14 @@ fun WeatherScreen(
         }
     }
 
+    val isRefreshing by viewModel.isRefreshing.collectAsState() // Стан для Pull-to-Refresh
+
+    // Стан для PullRefresh
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = isRefreshing,
+        onRefresh = { viewModel.refreshCurrentPageWeather() }
+    )
+
     Scaffold(
         topBar = {
             val currentActiveItem by viewModel.currentActivePagerItem.collectAsState()
@@ -402,29 +450,20 @@ fun WeatherScreen(
 
             val displayTitle = currentActiveItem?.displayName ?: "WeatherML"
             val currentItemId = currentActiveItem?.id
-            val weatherStateForCurrentPage = weatherDataMapValue[currentItemId]
+            val weatherStateForCurrentPage =
+                currentItemId?.let { weatherDataMapValue[it] } // Безпечне отримання
 
-            // Визначаємо, чи можна показувати TopAppBar
-            val canShowTopBar = when {
-                showPermissionRationale -> false // Якщо показуємо UI помилки дозволів, TopAppBar не потрібен
-                currentActiveItem == null -> false // Якщо немає активної сторінки (наприклад, при першому запуску до ініціалізації)
-                currentActiveItem is PagerItem.GeolocationPage && (currentActiveItem as PagerItem.GeolocationPage).isLoadingDetails -> {
-                    // Якщо це геолокаційна сторінка і для неї ще завантажуються деталі (назва міста)
-                    // Можна вирішити, чи показувати TopAppBar з "Loading location..." чи ні.
-                    // Для чистоти, давай поки що не будемо показувати.
-                    false
-                }
+            // TopAppBar показується ТІЛЬКИ ЯКЩО:
+            // 1. НЕ показується UI помилки дозволів (showPermissionRationale == false)
+            // 2. Є активна сторінка пейджера (currentActiveItem != null)
+            // 3. Стан погоди для цієї активної сторінки - Resource.Success
+            val canShowTopBar = !showPermissionRationale &&
+                    currentActiveItem != null &&
+                    weatherStateForCurrentPage is Resource.Success<*>
+            // Додатково можна перевірити, чи геолокація не в стані isLoadingDetails,
+            // якщо ти не хочеш TopAppBar під час завантаження назви міста для геолокації:
+            // && !(currentActiveItem is PagerItem.GeolocationPage && (currentActiveItem as PagerItem.GeolocationPage).isLoadingDetails)
 
-                weatherStateForCurrentPage is Resource.Error && weatherStateForCurrentPage.message?.contains(
-                    "permission",
-                    ignoreCase = true
-                ) == true -> {
-                    // Якщо помилка дозволів для поточної сторінки (малоймовірно тут, бо є showPermissionRationale)
-                    false
-                }
-                // В інших випадках (є активна сторінка, деталі завантажені, погода завантажується або успішна) - показуємо
-                else -> true
-            }
 
             if (canShowTopBar) {
                 Surface(
@@ -434,7 +473,7 @@ fun WeatherScreen(
                     TopAppBar(
                         title = {
                             Text(
-                                displayTitle,
+                                displayTitle, // displayTitle вже враховує currentActiveItem
                                 style = MaterialTheme.typography.headlineSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -461,6 +500,7 @@ fun WeatherScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(scaffoldPaddingValues)
+                .pullRefresh(pullRefreshState)
         ) {
             // Визначаємо, чи потрібно показувати UI помилки дозволів
             val geoPageId = PagerItem.GeolocationPage().id
@@ -527,7 +567,7 @@ fun WeatherScreen(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
                             loadingOrOtherErrorState.message ?: "Failed to load location.",
-                            textAlign = TextAlign.Center,
+                            textAlign = TextAlign.Justify,
                             modifier = Modifier.padding(16.dp)
                         )
                     }
@@ -554,6 +594,32 @@ fun WeatherScreen(
                         ) { Text("Loading page data...") }
                     }
                 }
+
+                // --- Page Indicator ---
+                val currentActivePagerItemForIndicator by viewModel.currentActivePagerItem.collectAsState()
+                val weatherStateForActivePage =
+                    currentActivePagerItemForIndicator?.id?.let { weatherDataMap[it] }
+
+                if (pagerItemsList.size > 1 && weatherStateForActivePage is Resource.Success<*>) { // Показуємо індикатори, тільки якщо сторінок більше однієї
+                    PageIndicator(
+                        numberOfPages = pagerItemsList.size,
+                        currentPage = pagerState.currentPage, // Використовуємо currentPage для негайного оновлення
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter) // Центруємо індикатор
+                            .padding(bottom = 9.dp), // Відступ знизу
+                        activeColor = MaterialTheme.colorScheme.onPrimaryContainer, // Або інший яскравий колір
+                        inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
+
+                // Індикатор Pull-to-Refresh, розміщуємо його зверху по центру
+                PullRefreshIndicator(
+                    refreshing = isRefreshing,
+                    state = pullRefreshState,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }
@@ -608,7 +674,7 @@ fun WeatherPageContent(
                 Text(
                     "Error: ${weatherState.message ?: "Unknown error"}", // ВИПРАВЛЕНО
                     style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center, // Змінено на Center
+                    textAlign = TextAlign.Justify, // Змінено на Center
                     modifier = Modifier.padding(16.dp)
                 )
             }

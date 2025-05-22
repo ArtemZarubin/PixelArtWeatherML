@@ -70,9 +70,11 @@ data class CoordinatesDto(
 // DTO for the "sys" object in /weather response
 @Serializable
 data class SysDto( // Це частина CurrentWeatherResponseDto
-    @SerialName("country") val country: String?, // Вже nullable, добре
-    @SerialName("sunrise") val sunrise: Long?,
-    @SerialName("sunset") val sunset: Long?
+    @SerialName("type") val type: Int? = null, // Залишаємо nullable, якщо вони можуть бути відсутні
+    @SerialName("id") val id: Int? = null,   // Залишаємо nullable
+    @SerialName("country") val country: String? = null, // <--- ЗРОБЛЕНО NULLABLE
+    @SerialName("sunrise") val sunrise: Long?, // Залишаємо nullable
+    @SerialName("sunset") val sunset: Long?   // Залишаємо nullable
 )
 
 // Optional DTOs for rain and snow (structure might vary, check API for "1h" or "3h" fields)

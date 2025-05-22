@@ -138,6 +138,9 @@ dependencies {
     // Pager
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.foundation.layout)
+
+    // Refreshing
+    implementation(libs.androidx.compose.material)
 }
 
 // Kapt configuration for Hilt (add to the end of the file if not present)
