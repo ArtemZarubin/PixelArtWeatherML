@@ -35,7 +35,8 @@ class WeatherRepositoryImpl @Inject constructor(
     override suspend fun getAllWeatherData(
         lat: Double,
         lon: Double,
-        apiKey: String
+        apiKey: String,
+        units: String
     ): Resource<WeatherDataBundle> {
         if (!connectivityObserver.isNetworkAvailable()) { // <--- ПЕРЕВІРКА
             return Resource.Error("No internet connection. Please check your network settings.")
@@ -46,13 +47,15 @@ class WeatherRepositoryImpl @Inject constructor(
                     apiService.getCurrentWeather(
                         latitude = lat,
                         longitude = lon,
-                        apiKey = apiKey
+                        apiKey = apiKey,
+                        units = units
                     )
                 }
                 val forecastDeferred = async {
                     apiService.getForecast(
                         latitude = lat,
                         longitude = lon,
+                        units = units,
                         apiKey = apiKey,
                         count = 40
                     )

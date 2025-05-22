@@ -21,7 +21,8 @@ interface WeatherRepository {
     suspend fun getAllWeatherData(
         lat: Double,
         lon: Double,
-        apiKey: String // API key is needed for both calls
+        apiKey: String, // API key is needed for both calls
+        units: String
     ): Resource<WeatherDataBundle>
 
     /**

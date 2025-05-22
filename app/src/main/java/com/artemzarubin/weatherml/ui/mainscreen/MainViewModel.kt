@@ -42,6 +42,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.artemzarubin.weatherml.data.preferences.UserPreferencesRepository
+import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
+import com.artemzarubin.weatherml.data.preferences.UserPreferences
 
 // PagerItem визначено тут (без змін)
 sealed class PagerItem {
@@ -75,10 +78,10 @@ sealed class PagerItem {
 }
 
 @HiltViewModel
-@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class MainViewModel @Inject constructor(
     private val weatherRepository: WeatherRepository,
     private val locationTracker: LocationTracker,
+    private val userPreferencesRepository: UserPreferencesRepository, // <--- НОВА ЗАЛЕЖНІСТЬ
     private val application: Application
 ) : ViewModel() {
 
@@ -162,6 +165,14 @@ class MainViewModel @Inject constructor(
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    val userPreferencesFlow: StateFlow<UserPreferences> =
+        userPreferencesRepository.userPreferencesFlow
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = UserPreferences(TemperatureUnit.CELSIUS) // Початкове значення
+            )
 
     init {
         Log.d("MainViewModel", "ViewModel initialized.")
@@ -660,6 +671,20 @@ class MainViewModel @Inject constructor(
                 "MainViewModel",
                 "fetchWeatherDataForPagerItem: COROUTINE STARTED for ${pagerItem.displayName}"
             )
+
+            // ... (встановлення Loading) ...
+            val currentUnits =
+                userPreferencesFlow.value.temperatureUnit // Отримуємо поточні одиниці
+            val unitsQueryParam =
+                if (currentUnits == TemperatureUnit.FAHRENHEIT) "imperial" else "metric"
+
+            val result = weatherRepository.getAllWeatherData(
+                lat = pagerItem.latitude,
+                lon = pagerItem.longitude,
+                apiKey = BuildConfig.OPEN_WEATHER_API_KEY,
+                units = unitsQueryParam // <--- ПЕРЕДАЄМО ОДИНИЦІ
+            )
+
             // Немедленно устанавливаем состояние загрузки с правильным сообщением
             _weatherDataStateMap.update { currentMap ->
                 Log.d(
@@ -672,11 +697,6 @@ class MainViewModel @Inject constructor(
                 }.toMap()
             }
 
-            val result = weatherRepository.getAllWeatherData(
-                lat = pagerItem.latitude,
-                lon = pagerItem.longitude,
-                apiKey = BuildConfig.OPEN_WEATHER_API_KEY
-            )
             Log.d(
                 "MainViewModel",
                 "fetchWeatherDataForPagerItem: Got result for ${pagerItem.displayName}: $result"
@@ -1221,6 +1241,28 @@ class MainViewModel @Inject constructor(
                     "MainViewModel",
                     "Pull-to-refresh finalized. _isRefreshing set to false for: ${currentItem.displayName}"
                 )
+            }
+        }
+    }
+
+    fun updateTemperatureUnit(unit: TemperatureUnit) {
+        viewModelScope.launch {
+            userPreferencesRepository.updateTemperatureUnit(unit)
+            // Після зміни одиниць, потрібно перезавантажити погоду для поточної сторінки пейджера,
+            // оскільки API має повернути дані в нових одиницях (або ми маємо їх конвертувати)
+            currentActivePagerItem.value?.let {
+                Log.d(
+                    "MainViewModel",
+                    "Temperature unit changed, refreshing weather for ${it.displayName}"
+                )
+                // Встановлюємо стан завантаження для поточної сторінки, щоб показати індикатор
+                _weatherDataStateMap.update { currentMap ->
+                    currentMap.toMutableMap().apply {
+                        this[it.id] = Resource.Loading(message = "Updating units...")
+                    }.toMap()
+                }
+                // Повторний запит погоди
+                fetchWeatherDataForPagerItem(it) // Цей метод має враховувати поточні одиниці
             }
         }
     }

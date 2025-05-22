@@ -36,6 +36,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
 import com.artemzarubin.weatherml.R
+import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
 import com.artemzarubin.weatherml.domain.model.CurrentWeather
 import com.artemzarubin.weatherml.domain.model.DailyForecast
 import com.artemzarubin.weatherml.domain.model.HourlyForecast
@@ -136,7 +137,10 @@ class MainActivity : ComponentActivity() {
 
 // Update CurrentWeatherMainSection to NOT include city name and last update
 @Composable
-fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
+fun CurrentWeatherMainSection(
+    currentWeather: CurrentWeather,
+    temperatureUnit: TemperatureUnit
+) { // <--- ДОДАНО ПАРАМЕТР
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -165,7 +169,7 @@ fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
             colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
         )
         Text(
-            text = "${currentWeather.temperatureCelsius.toInt()}°C",
+            text = "${currentWeather.temperatureCelsius.toInt()}°${if (temperatureUnit == TemperatureUnit.CELSIUS) "C" else "F"}", // <--- ДИНАМІЧНА ОДИНИЦЯ
             style = MaterialTheme.typography.titleMedium
         )
         Text(
@@ -177,12 +181,12 @@ fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
             style = MaterialTheme.typography.bodyLarge
         )
         Text(
-            text = "Feels like: ${currentWeather.feelsLikeCelsius.toInt()}°C",
+            text = "Feels like: ${currentWeather.feelsLikeCelsius.toInt()}°${if (temperatureUnit == TemperatureUnit.CELSIUS) "C" else "F"}",
             style = MaterialTheme.typography.titleSmall.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
         )
         currentWeather.mlFeelsLikeCelsius?.let { mlFeels ->
             Text(
-                text = "Feels like (ML): ${mlFeels.toInt()}°C", // Округлюємо до цілого
+                text = "Feels like (ML): ${mlFeels.toInt()}°${if (temperatureUnit == TemperatureUnit.CELSIUS) "C" else "F"}",
                 style = MaterialTheme.typography.titleSmall.copy(
                     color = MaterialTheme.colorScheme.secondary // Інший колір
                 ),
@@ -193,7 +197,10 @@ fun CurrentWeatherMainSection(currentWeather: CurrentWeather) {
 }
 
 @Composable
-fun CurrentWeatherDetailsSection(currentWeather: CurrentWeather) {
+fun CurrentWeatherDetailsSection(
+    currentWeather: CurrentWeather,
+    temperatureUnit: TemperatureUnit
+) { // <--- ДОДАНО ПАРАМЕТР
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceAround // This will space out the two Columns
@@ -206,7 +213,7 @@ fun CurrentWeatherDetailsSection(currentWeather: CurrentWeather) {
         ) {
             WeatherDetailItem(
                 label = "Wind",
-                value = "${currentWeather.windSpeedMps} m/s, ${
+                value = "${currentWeather.windSpeedMps} ${if (temperatureUnit == TemperatureUnit.CELSIUS) "m/s" else "mph"}, ${
                     degreesToCardinalDirection(
                         currentWeather.windDirectionDegrees
                     )
@@ -261,7 +268,10 @@ fun WeatherDetailItem(label: String, value: String, modifier: Modifier = Modifie
 }
 
 @Composable
-fun SimpleHourlyForecastItemView(hourlyForecast: HourlyForecast) {
+fun SimpleHourlyForecastItemView(
+    hourlyForecast: HourlyForecast,
+    temperatureUnit: TemperatureUnit
+) { // <--- ДОДАНО ПАРАМЕТР
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp)
@@ -288,7 +298,7 @@ fun SimpleHourlyForecastItemView(hourlyForecast: HourlyForecast) {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            "${hourlyForecast.temperatureCelsius.toInt()}°C",
+            "${hourlyForecast.temperatureCelsius.toInt()}°${if (temperatureUnit == TemperatureUnit.CELSIUS) "C" else "F"}",
             style = MaterialTheme.typography.bodyMedium
         )
         Text(
@@ -300,7 +310,10 @@ fun SimpleHourlyForecastItemView(hourlyForecast: HourlyForecast) {
 
 // Renamed from DailyForecastItemView to SimplifiedDailyForecastItemView
 @Composable
-fun SimplifiedDailyForecastItemView(dailyForecast: DailyForecast) {
+fun SimplifiedDailyForecastItemView(
+    dailyForecast: DailyForecast,
+    temperatureUnit: TemperatureUnit
+) {
     fun formatUnixTimestampToDay(timestampMillis: Long): String {
         if (timestampMillis == 0L) return "N/A"
         val forecastDate = Date(timestampMillis)
@@ -369,7 +382,7 @@ fun SimplifiedDailyForecastItemView(dailyForecast: DailyForecast) {
             modifier = Modifier.weight(2.0f) // Weight for this column
         ) {
             Text(
-                text = "${dailyForecast.tempMaxCelsius.toInt()}°/${dailyForecast.tempMinCelsius.toInt()}°",
+                text = "${dailyForecast.tempMaxCelsius.toInt()}°/${dailyForecast.tempMinCelsius.toInt()}°${if (temperatureUnit == TemperatureUnit.CELSIUS) "C" else "F"}",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
             )
             // API POP

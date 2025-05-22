@@ -7,18 +7,18 @@ import com.artemzarubin.weatherml.util.Resource
 import javax.inject.Inject
 
 class GetWeatherDataBundleUseCase @Inject constructor(
-    private val weatherRepository: WeatherRepository
+    private val repository: WeatherRepository
 ) {
-    suspend operator fun invoke(lat: Double, lon: Double): Resource<WeatherDataBundle> {
-        val apiKey = BuildConfig.OPEN_WEATHER_API_KEY
-
-        if (apiKey.isBlank()) {
-            return Resource.Error("API key is missing.")
-        }
-        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
-            return Resource.Error("Invalid geographical coordinates provided.")
-        }
-        // Return method
-        return weatherRepository.getAllWeatherData(lat = lat, lon = lon, apiKey = apiKey)
+    suspend operator fun invoke(
+        lat: Double,
+        lon: Double,
+        units: String
+    ): Resource<WeatherDataBundle> { // <--- ДОДАНО units
+        return repository.getAllWeatherData(
+            lat = lat,
+            lon = lon,
+            apiKey = BuildConfig.OPEN_WEATHER_API_KEY, // Або передавай ключ як параметр
+            units = units // <--- ПЕРЕДАЄМО units
+        )
     }
 }

@@ -141,6 +141,9 @@ dependencies {
 
     // Refreshing
     implementation(libs.androidx.compose.material)
+
+    // Settings
+    implementation(libs.androidx.datastore.preferences)
 }
 
 // Kapt configuration for Hilt (add to the end of the file if not present)

@@ -76,6 +76,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.artemzarubin.weatherml.R
+import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
 import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.ui.CurrentWeatherDetailsSection
 import com.artemzarubin.weatherml.ui.CurrentWeatherMainSection
@@ -135,11 +136,14 @@ fun PageIndicator(
 @Composable
 fun WeatherScreen(
     viewModel: MainViewModel = hiltViewModel(),
-    onNavigateToManageCities: () -> Unit
+    onNavigateToManageCities: () -> Unit,
+    onNavigateToSettings: () -> Unit // <--- ДОДАНО НОВИЙ ПАРАМЕТР
 ) {
     val pagerItemsList by viewModel.pagerItems.collectAsState()
     val currentPagerIndexFromVM by viewModel.currentPagerIndex.collectAsState()
     val weatherDataMap by viewModel.weatherDataStateMap.collectAsState() // Збираємо всю мапу станів
+
+    val userPreferences by viewModel.userPreferencesFlow.collectAsState() // <--- ОТРИМУЄМО НАЛАШТУВАННЯ
 
     val pagerState = rememberPagerState(
         initialPage = currentPagerIndexFromVM.coerceIn(
@@ -488,6 +492,16 @@ fun WeatherScreen(
                                     colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
                                 )
                             }
+                            // --- НОВА ІКОНКА ТА ДІЯ ДЛЯ НАЛАШТУВАНЬ ---
+                            IconButton(onClick = onNavigateToSettings) { // <--- ВИКЛИКАЄМО НОВУ ЛЯМБДУ
+                                Image(
+                                    painter = painterResource(id = R.drawable.settings),
+                                    contentDescription = "Settings",
+                                    modifier = Modifier.size(25.dp), // Можна зробити трохи меншою або такою ж
+                                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
+                                )
+                            }
+                            // --- КІНЕЦЬ НОВОЇ ІКОНКИ ---
                         },
                         colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
                     )
@@ -585,6 +599,7 @@ fun WeatherScreen(
                         }
                         WeatherPageContent(
                             weatherState = weatherStateForThisPage,
+                            temperatureUnit = userPreferences.temperatureUnit, // <--- ЗІБРАНИЙ СТАН
                             isGeolocationPageAndLoadingDetails = (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails)
                         )
                     } else {
@@ -628,6 +643,7 @@ fun WeatherScreen(
 @Composable
 fun WeatherPageContent(
     weatherState: Resource<WeatherDataBundle>,
+    temperatureUnit: TemperatureUnit,
     isGeolocationPageAndLoadingDetails: Boolean = false
 ) {
     if (isGeolocationPageAndLoadingDetails) {
@@ -691,7 +707,10 @@ fun WeatherPageContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    CurrentWeatherMainSection(currentWeather = bundle.currentWeather)
+                    CurrentWeatherMainSection(
+                        currentWeather = bundle.currentWeather,
+                        temperatureUnit = temperatureUnit
+                    ) // <--- ПЕРЕДАЄМО
                     // --- Hourly Forecast Section ---
                     PixelArtCard(
                         modifier = Modifier.fillMaxWidth(),
@@ -711,13 +730,11 @@ fun WeatherPageContent(
                                     modifier = Modifier.padding(vertical = 8.dp)
                                 )
                             } else {
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 4.dp)
-                                ) {
+                                LazyRow {
                                     items(bundle.hourlyForecasts) {
                                         SimpleHourlyForecastItemView(
-                                            it
+                                            it,
+                                            temperatureUnit
                                         )
                                     }
                                 }
@@ -741,7 +758,10 @@ fun WeatherPageContent(
                                 // ВИПРАВЛЕНО: Використовуємо Column з forEach для денного прогнозу
                                 Column {
                                     bundle.dailyForecasts.forEachIndexed { index, dailyItem ->
-                                        SimplifiedDailyForecastItemView(dailyItem)
+                                        SimplifiedDailyForecastItemView(
+                                            dailyItem,
+                                            temperatureUnit
+                                        ) // <--- ПЕРЕДАЄМО
                                         if (index < bundle.dailyForecasts.size - 1) {
                                             HorizontalDivider(
                                                 color = MaterialTheme.colorScheme.outline.copy(
@@ -760,7 +780,10 @@ fun WeatherPageContent(
                         internalPadding = 16.dp,
                         borderWidth = 2.dp
                     ) {
-                        CurrentWeatherDetailsSection(currentWeather = bundle.currentWeather)
+                        CurrentWeatherDetailsSection(
+                            currentWeather = bundle.currentWeather,
+                            temperatureUnit = temperatureUnit
+                        )
                     }
                 }
             } else {
