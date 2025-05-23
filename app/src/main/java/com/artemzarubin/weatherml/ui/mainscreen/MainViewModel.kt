@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.artemzarubin.weatherml.BuildConfig
+import com.artemzarubin.weatherml.data.preferences.AppTheme
 import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
 import com.artemzarubin.weatherml.data.preferences.UserPreferences
 import com.artemzarubin.weatherml.data.preferences.UserPreferencesRepository
@@ -179,7 +180,10 @@ class MainViewModel @Inject constructor(
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5000),
-                initialValue = UserPreferences(TemperatureUnit.CELSIUS) // Початкове значення
+                initialValue = UserPreferences(
+                    TemperatureUnit.CELSIUS,
+                    AppTheme.SYSTEM
+                ) // <--- ОНОВЛЕНО initialValue
             )
 
     init {
@@ -1246,6 +1250,13 @@ class MainViewModel @Inject constructor(
                 }
             }
             Log.d("MainViewModel", "Saved locations reordered in DB.")
+        }
+    }
+
+    fun updateAppTheme(theme: AppTheme) {
+        viewModelScope.launch {
+            userPreferencesRepository.updateAppTheme(theme)
+            // Перезавантаження погоди не потрібне, тема змінюється на рівні UI
         }
     }
 }

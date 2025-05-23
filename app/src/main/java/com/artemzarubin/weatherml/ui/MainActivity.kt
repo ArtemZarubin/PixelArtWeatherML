@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -34,12 +35,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.rememberNavController
 import com.artemzarubin.weatherml.R
 import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
 import com.artemzarubin.weatherml.domain.model.CurrentWeather
 import com.artemzarubin.weatherml.domain.model.DailyForecast
 import com.artemzarubin.weatherml.domain.model.HourlyForecast
+import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
 import com.artemzarubin.weatherml.ui.theme.WeatherMLTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
@@ -122,13 +125,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            WeatherMLTheme {
+            val viewModel: MainViewModel = hiltViewModel() // Отримуємо ViewModel тут
+            val userPreferences by viewModel.userPreferencesFlow.collectAsState() // Спостерігаємо за налаштуваннями
+
+            WeatherMLTheme(userSelectedTheme = userPreferences.appTheme) { // <--- ПЕРЕДАЄМО ВИБРАНУ ТЕМУ
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     val navController = rememberNavController()
-                    AppNavHost(navController = navController)
+                    // Передаємо viewModel в AppNavHost, щоб SettingsScreen міг її отримати
+                    AppNavHost(navController = navController, mainViewModel = viewModel)
                 }
             }
         }

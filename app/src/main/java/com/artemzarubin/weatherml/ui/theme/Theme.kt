@@ -5,19 +5,20 @@ package com.artemzarubin.weatherml.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import com.artemzarubin.weatherml.data.preferences.AppTheme
 
 @Composable
 fun WeatherMLTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is disabled for a consistent pixel art look
-    dynamicColor: Boolean = false,
+    userSelectedTheme: AppTheme = AppTheme.SYSTEM, // <--- ПАРАМЕТР З ТИПОМ AppTheme
     content: @Composable () -> Unit
 ) {
-    val colorScheme = if (darkTheme) {
-        DarkColorScheme // Using defined DarkColorScheme
-    } else {
-        LightColorScheme // Using defined LightColorScheme
+    val darkThemeEnabled: Boolean = when (userSelectedTheme) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
     }
+
+    val colorScheme = if (darkThemeEnabled) DarkColorScheme else LightColorScheme
 
     MaterialTheme(
         colorScheme = colorScheme,

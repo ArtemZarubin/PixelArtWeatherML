@@ -7,12 +7,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth // Потрібен для Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width // Потрібен для Spacer
-import androidx.compose.material3.* // Ktlint може запропонувати *
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -21,10 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import com.artemzarubin.weatherml.R // Для доступу до R.drawable
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.artemzarubin.weatherml.R
+import com.artemzarubin.weatherml.data.preferences.AppTheme
 import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
 import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
-import androidx.hilt.navigation.compose.hiltViewModel // Якщо ти отримуєш ViewModel тут
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -68,7 +76,7 @@ fun SettingsScreen(
                 .padding(16.dp),
         ) {
             Text("Temperature Units", style = MaterialTheme.typography.headlineSmall) // Твій стиль
-            Spacer(modifier = Modifier.height(12.dp)) // Збільшив відступ після заголовка
+            Spacer(modifier = Modifier.height(10.dp)) // Збільшив відступ після заголовка
 
             // --- Опція Цельсій ---
             Row(
@@ -129,7 +137,45 @@ fun SettingsScreen(
                     modifier = Modifier.align(Alignment.CenterVertically)
                 )
             }
-            // Тут можна буде додати інші налаштування, наприклад, для теми
+
+            // --- РОЗДІЛЬНИК ---
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 16.dp), // Залишаємо відступи
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+            )
+
+            // --- СЕКЦІЯ ВИБОРУ ТЕМИ ---
+            Text("App Theme", style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(10.dp))
+
+            val appThemes = listOf(AppTheme.SYSTEM, AppTheme.LIGHT, AppTheme.DARK)
+            appThemes.forEach { themeOption ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.updateAppTheme(themeOption) } // Викликаємо метод ViewModel
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(
+                            id = if (userPreferences.appTheme == themeOption) R.drawable.radio_checked // Твоя іконка "вибрано"
+                            else R.drawable.radio_unchecked // Твоя іконка "не вибрано"
+                        ),
+                        contentDescription = "${themeOption.name} theme radio button",
+                        modifier = Modifier.size(24.dp),
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = themeOption.name.lowercase()
+                            .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }, // Робимо першу літеру великою
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
+                }
+            }
+            // --- КІНЕЦЬ СЕКЦІЇ ВИБОРУ ТЕМИ ---
         }
     }
 }

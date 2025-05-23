@@ -192,8 +192,7 @@ fun ManageCitiesScreen(
                 LazyColumn(modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)) {
-                    // ВИКОРИСТОВУЄМО itemsIndexed
-                    itemsIndexed(
+                    itemsIndexed( // Використовуємо itemsIndexed, щоб мати доступ до індексу
                         items = savedLocationPages,
                         key = { _, savedPageItem -> savedPageItem.id } // Ключ тепер приймає (index, item)
                     ) { index, savedPageItem -> // Тепер index та savedPageItem доступні
@@ -223,7 +222,11 @@ fun ManageCitiesScreen(
                             canMoveUp = (index > 0),
                             canMoveDown = (index < savedLocationPages.size - 1)
                         )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                        // --- УМОВА ДЛЯ РОЗДІЛЬНИКА ---
+                        if (index < savedLocationPages.size - 1) { // Показуємо роздільник, тільки якщо це НЕ останній елемент
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+                        }
+                        // --- КІНЕЦЬ УМОВИ ---
                     }
                 }
             }
