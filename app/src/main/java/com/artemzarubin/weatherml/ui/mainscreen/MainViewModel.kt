@@ -9,6 +9,9 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.artemzarubin.weatherml.BuildConfig
+import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
+import com.artemzarubin.weatherml.data.preferences.UserPreferences
+import com.artemzarubin.weatherml.data.preferences.UserPreferencesRepository
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyFeatureDto
 import com.artemzarubin.weatherml.domain.location.LocationTracker
 import com.artemzarubin.weatherml.domain.model.SavedLocation
@@ -16,8 +19,6 @@ import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -36,15 +37,13 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import com.artemzarubin.weatherml.data.preferences.UserPreferencesRepository
-import com.artemzarubin.weatherml.data.preferences.TemperatureUnit
-import com.artemzarubin.weatherml.data.preferences.UserPreferences
 
 // PagerItem визначено тут (без змін)
 sealed class PagerItem {
@@ -84,6 +83,10 @@ class MainViewModel @Inject constructor(
     private val userPreferencesRepository: UserPreferencesRepository, // <--- НОВА ЗАЛЕЖНІСТЬ
     private val application: Application
 ) : ViewModel() {
+
+    companion object {
+        const val MAX_SAVED_LOCATIONS = 10 // Максимальна кількість ЗБЕРЕЖЕНИХ локацій
+    }
 
     private val _weatherDataStateMap =
         MutableStateFlow<Map<String, Resource<WeatherDataBundle>>>(emptyMap())
@@ -159,6 +162,11 @@ class MainViewModel @Inject constructor(
             items.getOrNull(index)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val canAddNewLocation: StateFlow<Boolean> =
+        _savedLocationsFromDbFlow // Використовуємо оригінальний Flow з БД
+            .map { it.size < MAX_SAVED_LOCATIONS }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     private var fetchWeatherJobs: MutableMap<String, Job> = mutableMapOf()
     private var autocompleteJob: Job? = null
     private var initialSetupFlowCompleted = false // Для керування початковим налаштуванням
@@ -179,43 +187,24 @@ class MainViewModel @Inject constructor(
         observeActivePagerItemToFetchWeather() // Запускаем наблюдателя за погодой
 
         viewModelScope.launch {
-            // Ждем первого стабильного состояния pagerItems
             pagerItems.first { items ->
                 val permissionGranted = hasLocationPermission()
-                // Получаем текущее состояние isLoadingDetails для геолокационной страницы
                 val geolocationPageIsCurrentlyLoadingDetails =
                     _geolocationPagerItemState.value.isLoadingDetails
 
                 if (permissionGranted) {
-                    // Если разрешение есть, считаем список стабильным, если:
-                    // 1. В списке уже есть GeolocationPage (неважно, грузятся ли для нее детали,
-                    //    determineInitialPage вызовет fetchDetailsForGeolocationPage если нужно).
-                    // ИЛИ
-                    // 2. В списке есть хотя бы одна SavedPage.
-                    // ИЛИ
-                    // 3. GeolocationPage ЕЩЕ НЕТ в списке, НО ее детали УЖЕ НЕ грузятся
-                    //    (т.е. isLoadingDetails стало false - загрузка завершилась успехом/ошибкой, или не начиналась).
-                    //    Это позволяет продолжить, если геолокация не определилась, но мы не хотим ждать вечно.
                     val hasGeolocationPage = items.any { it is PagerItem.GeolocationPage }
                     val hasSavedPage = items.any { it is PagerItem.SavedPage }
 
                     if (hasGeolocationPage || hasSavedPage) {
-                        true // Либо геолокация, либо сохраненная страница уже в списке
+                        true
                     } else {
-                        // Если ни того, ни другого еще нет, но разрешение есть,
-                        // мы ждем, только если детали геолокации все еще активно грузятся.
-                        // Если они НЕ грузятся, значит, либо они загружены (и скоро страница появится),
-                        // либо была ошибка, либо геолокация не будет доступна. В этом случае можно продолжать.
                         !geolocationPageIsCurrentlyLoadingDetails
                     }
                 } else {
-                    // Если разрешения нет:
-                    // Список стабилен, если в нем есть хотя бы одна SavedPage,
-                    // или если он пуст (determineInitialPage покажет ошибку или ничего).
                     items.any { it is PagerItem.SavedPage } || items.isEmpty()
                 }
             }.let { initialItems ->
-                // Убедимся, что выполняем только один раз, даже если pagerItems эмитит снова быстро
                 if (!initialSetupFlowCompleted) {
                     initialSetupFlowCompleted = true
                     Log.d(
@@ -231,9 +220,6 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
-        // Остальная часть init, если есть (например, tryInitialSetupOrLoadActive, если он все еще нужен и делает что-то другое)
-        // Если tryInitialSetupOrLoadActive дублирует логику determineInitialPage, его можно удалить или рефакторить.
-        // tryInitialSetupOrLoadActive() // <-- Проверь, нужен ли этот вызов здесь
     }
 
     private suspend fun determineInitialPage(currentPagerItems: List<PagerItem>) {
@@ -244,46 +230,36 @@ class MainViewModel @Inject constructor(
         var targetIndex = -1
         var newActiveLocationIdToSetInDb: Int? = null
 
-        // 1. ПРИОРИТЕТ: Геолокация при запуске, если есть разрешение
         if (hasLocationPermission()) {
             val geoPageIndex = currentPagerItems.indexOfFirst { it is PagerItem.GeolocationPage }
             if (geoPageIndex != -1) {
                 targetIndex = geoPageIndex
-                newActiveLocationIdToSetInDb =
-                    0 // 0 означает, что активна геолокация (нет активного *сохраненного*)
+                newActiveLocationIdToSetInDb = 0
                 Log.i(
                     "MainViewModel",
                     "Initial: Geolocation is available. Setting as initial page (Index: $targetIndex). DB active ID will be 0."
                 )
 
                 val geoPage = currentPagerItems[targetIndex] as PagerItem.GeolocationPage
-                // Если детали геолокации еще не загружены (например, lat/lon = 0.0 или имя дефолтное)
-                // или если она явно в состоянии загрузки деталей.
                 if (geoPage.isLoadingDetails || (geoPage.lat == 0.0 && geoPage.lon == 0.0 && geoPage.fetchedCityName == "My Location")) {
                     Log.d(
                         "MainViewModel",
                         "Initial: Geolocation page ($geoPage) needs details or is loading. Fetching..."
                     )
-                    fetchDetailsForGeolocationPage() // Запрашиваем/обновляем детали
+                    fetchDetailsForGeolocationPage()
                 }
             } else {
-                // Это может случиться, если разрешение есть, но GeolocationPage еще не успела добавиться в pagerItems
-                // (например, из-за асинхронности Flow).
                 Log.w(
                     "MainViewModel",
                     "Initial: Has permission, but GeolocationPage not found in currentPagerItems. Attempting to fetch details anyway."
                 )
-                // Попытаемся запустить загрузку деталей геолокации, если она еще не идет.
-                // Это может помочь ей появиться в pagerItems при следующем обновлении.
                 if (!_geolocationPagerItemState.value.isLoadingDetails) {
                     fetchDetailsForGeolocationPage()
                 }
             }
         }
 
-        // 2. ЗАПАСНОЙ ВАРИАНТ: Если геолокация не была установлена (нет разрешения, или не нашлась сразу)
         if (targetIndex == -1) {
-            // Ищем последний активный *сохраненный* город в БД
             val activeSavedInDb =
                 (_savedLocationsFromDbFlow.firstOrNull() ?: emptyList()).find { it.isCurrentActive }
             if (activeSavedInDb != null) {
@@ -291,8 +267,7 @@ class MainViewModel @Inject constructor(
                     currentPagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == activeSavedInDb.id }
                 if (activeSavedIndexInPager != -1) {
                     targetIndex = activeSavedIndexInPager
-                    newActiveLocationIdToSetInDb =
-                        activeSavedInDb.id // Этот сохраненный город будет активным
+                    newActiveLocationIdToSetInDb = activeSavedInDb.id
                     Log.i(
                         "MainViewModel",
                         "Initial: No geolocation. Found active saved in DB: ${activeSavedInDb.cityName} (Index: $targetIndex). DB active ID will be ${activeSavedInDb.id}."
@@ -305,8 +280,6 @@ class MainViewModel @Inject constructor(
                 }
             }
 
-            // Если все еще нет targetIndex (не было геолокации, не было активного в БД или он не нашелся в пейджере)
-            // Берем первую *сохраненную* страницу, если таковые имеются
             if (targetIndex == -1) {
                 val firstSavedPageIndex =
                     currentPagerItems.indexOfFirst { it is PagerItem.SavedPage }
@@ -314,8 +287,7 @@ class MainViewModel @Inject constructor(
                     targetIndex = firstSavedPageIndex
                     val firstSavedPageItem =
                         currentPagerItems[firstSavedPageIndex] as PagerItem.SavedPage
-                    newActiveLocationIdToSetInDb =
-                        firstSavedPageItem.location.id // Первый сохраненный становится активным
+                    newActiveLocationIdToSetInDb = firstSavedPageItem.location.id
                     Log.i(
                         "MainViewModel",
                         "Initial: No geo/active. Using first saved page: ${firstSavedPageItem.displayName} (Index: $targetIndex). DB active ID will be ${firstSavedPageItem.location.id}."
@@ -324,7 +296,6 @@ class MainViewModel @Inject constructor(
             }
         }
 
-        // Устанавливаем вычисленный индекс и обновляем активный город в БД
         if (targetIndex != -1) {
             if (_currentPagerIndex.value != targetIndex) {
                 _currentPagerIndex.value = targetIndex
@@ -336,14 +307,11 @@ class MainViewModel @Inject constructor(
                 )
             }
 
-            // Обновляем запись об активном городе в БД
             newActiveLocationIdToSetInDb?.let { activeId ->
-                // Проверяем, нужно ли вообще обновлять БД, чтобы избежать лишних записей,
-                // если состояние в БД уже соответствует (хотя setActiveLocation обычно сама это проверяет)
                 val currentActiveInDb = (_savedLocationsFromDbFlow.firstOrNull()
                     ?: emptyList()).find { it.isCurrentActive }
                 val currentDbActiveId = if (currentActiveInDb != null) currentActiveInDb.id else 0
-                if (activeId == 0 && currentActiveInDb == null) { // Хотим геолокацию, и в БД уже нет активного сохраненного
+                if (activeId == 0 && currentActiveInDb == null) {
                     // Ничего не делаем
                 } else if (currentDbActiveId != activeId) {
                     weatherRepository.setActiveLocation(activeId)
@@ -351,8 +319,6 @@ class MainViewModel @Inject constructor(
                 }
             }
 
-            // Дополнительная проверка: если выбранная страница - геолокация, но погода для нее еще не загружена
-            // (и детали не грузятся), то инициируем загрузку погоды.
             val finalSelectedPagerItem = currentPagerItems.getOrNull(targetIndex)
             if (finalSelectedPagerItem != null &&
                 _weatherDataStateMap.value[finalSelectedPagerItem.id] !is Resource.Success &&
@@ -376,11 +342,9 @@ class MainViewModel @Inject constructor(
                 "MainViewModel",
                 "Initial: Could not determine any initial page. PagerItems size: ${currentPagerItems.size}, HasPerm: ${hasLocationPermission()}"
             )
-            // Если список страниц пуст и нет разрешения на геолокацию, показываем ошибку.
             if (currentPagerItems.isEmpty() && !hasLocationPermission()) {
                 val geoPageId =
-                    PagerItem.GeolocationPage().id // Используем ID геолокационной страницы для ошибки разрешений
-                // Устанавливаем ошибку, только если ее еще нет или она не связана с разрешениями
+                    PagerItem.GeolocationPage().id
                 if (!(_weatherDataStateMap.value[geoPageId] is Resource.Error &&
                             _weatherDataStateMap.value[geoPageId]?.message?.contains(
                                 "permission",
@@ -414,13 +378,11 @@ class MainViewModel @Inject constructor(
             .distinctUntilChanged { old, new ->
                 val oldGeoLoading = (old as? PagerItem.GeolocationPage)?.isLoadingDetails
                 val newGeoLoading = (new as? PagerItem.GeolocationPage)?.isLoadingDetails
-                // Логируем для отладки distinctUntilChanged
-                // Log.d("MainViewModel_Observer", "distinctUntilChanged: oldID=${old.id}, newID=${new.id}, oldGeoLoading=$oldGeoLoading, newGeoLoading=$newGeoLoading")
-                (old.id == new.id && oldGeoLoading == newGeoLoading) // Упрощенное условие, если id одинаковый и isLoadingDetails для гео не изменился
+                (old.id == new.id && oldGeoLoading == newGeoLoading)
             }
             .onEach { pagerItem ->
                 Log.i(
-                    "MainViewModel_Observer", // Изменен тег для легкого поиска
+                    "MainViewModel_Observer",
                     "Current Pager Item to fetch for: ${pagerItem.displayName} (ID: ${pagerItem.id}), isLoadingDetails: ${(pagerItem as? PagerItem.GeolocationPage)?.isLoadingDetails}"
                 )
                 if (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails) {
@@ -428,9 +390,8 @@ class MainViewModel @Inject constructor(
                         "MainViewModel_Observer",
                         "Geolocation page details are still loading (${pagerItem.fetchedCityName}). Weather fetch will wait."
                     )
-                    return@onEach // Ждем, пока isLoadingDetails станет false
+                    return@onEach
                 }
-                // Если мы здесь, значит либо это SavedPage, либо GeolocationPage с isLoadingDetails = false
                 Log.d(
                     "MainViewModel_Observer",
                     "Proceeding to fetchWeatherDataForPagerItem for ${pagerItem.displayName}"
@@ -454,7 +415,6 @@ class MainViewModel @Inject constructor(
                     _currentPagerIndex.value = pageIndex
                 }
 
-                // Обновляем активный город в БД в зависимости от выбранной страницы
                 if (selectedPagerItem is PagerItem.SavedPage) {
                     weatherRepository.setActiveLocation(selectedPagerItem.location.id)
                     Log.d(
@@ -462,9 +422,6 @@ class MainViewModel @Inject constructor(
                         "onPageChanged: Set ${selectedPagerItem.displayName} (ID: ${selectedPagerItem.location.id}) as active in DB."
                     )
                 } else if (selectedPagerItem is PagerItem.GeolocationPage) {
-                    // Если пользователь выбрал страницу геолокации,
-                    // это означает, что никакой *сохраненный* город не является активным.
-                    // Используем 0 или специальный ID для этого состояния в БД.
                     weatherRepository.setActiveLocation(0)
                     Log.d(
                         "MainViewModel",
@@ -497,7 +454,6 @@ class MainViewModel @Inject constructor(
         }
 
         val geoPageId = PagerItem.GeolocationPage().id
-        // Проверяем, не выполняется ли уже активная работа для этой страницы
         if (fetchWeatherJobs[geoPageId]?.isActive == true) {
             Log.d(
                 "MainViewModel",
@@ -505,15 +461,11 @@ class MainViewModel @Inject constructor(
             )
             return
         }
-        // Проверяем, если детали УЖЕ успешно загружены (isLoadingDetails = false и имя города не дефолтное)
         if (!_geolocationPagerItemState.value.isLoadingDetails && _geolocationPagerItemState.value.fetchedCityName != "My Location" && _geolocationPagerItemState.value.fetchedCityName != "Loading location...") {
             Log.d(
                 "MainViewModel",
                 "fetchDetailsForGeolocationPage: Details already loaded for ${_geolocationPagerItemState.value.fetchedCityName}. isLoadingDetails: false. Triggering weather fetch if current."
             )
-            // Если это текущая активная страница, и погода для нее еще не загружена или была ошибка,
-            // observeActivePagerItemToFetchWeather должен это обработать.
-            // Можно дополнительно проверить и запустить, если нужно принудительно:
             if (currentActivePagerItem.value?.id == geoPageId && _weatherDataStateMap.value[geoPageId] !is Resource.Success) {
                 fetchWeatherDataForPagerItem(_geolocationPagerItemState.value)
             }
@@ -525,14 +477,13 @@ class MainViewModel @Inject constructor(
                 "MainViewModel",
                 "fetchDetailsForGeolocationPage: COROUTINE STARTED for $geoPageId."
             )
-            // Устанавливаем состояние загрузки деталей, если еще не установлено
             if (_geolocationPagerItemState.value.isLoadingDetails == false || _geolocationPagerItemState.value.fetchedCityName == "My Location") {
                 _geolocationPagerItemState.update {
                     Log.d(
                         "MainViewModel",
                         "fetchDetailsForGeolocationPage: Updating geoPagerItemState to LOADING DETAILS."
                     )
-                    PagerItem.GeolocationPage( // Используем конструктор, чтобы сбросить lat/lon если нужно
+                    PagerItem.GeolocationPage(
                         isLoadingDetails = true,
                         fetchedCityName = "Loading location..."
                     )
@@ -545,7 +496,7 @@ class MainViewModel @Inject constructor(
                     "fetchDetailsForGeolocationPage: Attempting to get current location from locationTracker..."
                 )
                 val locationData: Location? =
-                    locationTracker.getCurrentLocation() // Эта функция suspend? Если нет, обернуть в withContext(Dispatchers.IO) если она блокирующая
+                    locationTracker.getCurrentLocation()
 
                 if (locationData != null) {
                     Log.i(
@@ -580,7 +531,7 @@ class MainViewModel @Inject constructor(
                             "MainViewModel",
                             "fetchDetailsForGeolocationPage: Failed to get location details: ${details.message}"
                         )
-                        city = "Details Error" // Указываем на ошибку получения деталей
+                        city = "Details Error"
                     }
 
                     _geolocationPagerItemState.update {
@@ -593,22 +544,21 @@ class MainViewModel @Inject constructor(
                             lon = locationData.longitude,
                             fetchedCityName = city,
                             fetchedCountryCode = country,
-                            isLoadingDetails = false // <--- КЛЮЧЕВОЙ МОМЕНТ
+                            isLoadingDetails = false
                         )
                     }
-                } else { // locationData == null
+                } else {
                     Log.w("MainViewModel", "fetchDetailsForGeolocationPage: locationData is NULL.")
                     _geolocationPagerItemState.update {
                         Log.w(
                             "MainViewModel",
                             "fetchDetailsForGeolocationPage: Updating geoPagerItemState with LOCATION UNKNOWN. isLoadingDetails: false"
                         )
-                        it.copy( // Сохраняем предыдущие lat/lon, если они были, или оставляем 0.0
-                            isLoadingDetails = false, // <--- КЛЮЧЕВОЙ МОМЕНТ
+                        it.copy(
+                            isLoadingDetails = false,
                             fetchedCityName = "Location Unknown"
                         )
                     }
-                    // Также обновляем _weatherDataStateMap, чтобы показать ошибку, если геолокация не найдена
                     _weatherDataStateMap.update { currentMap ->
                         Log.w(
                             "MainViewModel",
@@ -632,7 +582,7 @@ class MainViewModel @Inject constructor(
                         "fetchDetailsForGeolocationPage: Updating geoPagerItemState with LOCATION ERROR due to exception. isLoadingDetails: false"
                     )
                     it.copy(
-                        isLoadingDetails = false, // <--- КЛЮЧЕВОЙ МОМЕНТ
+                        isLoadingDetails = false,
                         fetchedCityName = "Location Error"
                     )
                 }
@@ -662,7 +612,6 @@ class MainViewModel @Inject constructor(
             "Attempting to fetch weather for ${pagerItem.displayName} (ID: $itemId). Current map state: ${_weatherDataStateMap.value[itemId]}"
         )
 
-        // Отменяем предыдущий job, если он был
         fetchWeatherJobs[itemId]?.cancel()
         Log.d("MainViewModel", "Previous fetch job for $itemId cancelled (if existed).")
 
@@ -672,20 +621,6 @@ class MainViewModel @Inject constructor(
                 "fetchWeatherDataForPagerItem: COROUTINE STARTED for ${pagerItem.displayName}"
             )
 
-            // ... (встановлення Loading) ...
-            val currentUnits =
-                userPreferencesFlow.value.temperatureUnit // Отримуємо поточні одиниці
-            val unitsQueryParam =
-                if (currentUnits == TemperatureUnit.FAHRENHEIT) "imperial" else "metric"
-
-            val result = weatherRepository.getAllWeatherData(
-                lat = pagerItem.latitude,
-                lon = pagerItem.longitude,
-                apiKey = BuildConfig.OPEN_WEATHER_API_KEY,
-                units = unitsQueryParam // <--- ПЕРЕДАЄМО ОДИНИЦІ
-            )
-
-            // Немедленно устанавливаем состояние загрузки с правильным сообщением
             _weatherDataStateMap.update { currentMap ->
                 Log.d(
                     "MainViewModel",
@@ -696,6 +631,19 @@ class MainViewModel @Inject constructor(
                         Resource.Loading(message = "Fetching weather for ${pagerItem.displayName}...")
                 }.toMap()
             }
+
+            val currentUnits =
+                userPreferencesFlow.value.temperatureUnit
+            val unitsQueryParam =
+                if (currentUnits == TemperatureUnit.FAHRENHEIT) "imperial" else "metric"
+
+            val result = weatherRepository.getAllWeatherData(
+                lat = pagerItem.latitude,
+                lon = pagerItem.longitude,
+                apiKey = BuildConfig.OPEN_WEATHER_API_KEY,
+                units = unitsQueryParam
+            )
+
 
             Log.d(
                 "MainViewModel",
@@ -734,12 +682,9 @@ class MainViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            flowOf(query) // Використовуємо flowOf для одного значення
+            flowOf(query)
                 .flatMapLatest { debouncedQuery ->
                     Log.d("MainViewModel", "Debounced search for: $debouncedQuery")
-                    // weatherRepository.getCityAutocompleteSuggestions повертає Resource, який є Flow-like, але не Flow.
-                    // Якщо він повертає Resource напряму, то flatMapLatest не потрібен, або потрібен інший підхід.
-                    // Припустимо, getCityAutocompleteSuggestions - це suspend функція, що повертає Resource
                     try {
                         val resourceResult = weatherRepository.getCityAutocompleteSuggestions(
                             query = debouncedQuery,
@@ -757,7 +702,7 @@ class MainViewModel @Inject constructor(
                 .catch { e ->
                     _autocompleteResults.value =
                         Resource.Error("Autocomplete search failed: ${e.message}")
-                } // emit не потрібен тут
+                }
                 .collectLatest { results -> _autocompleteResults.value = results }
         }
     }
@@ -772,30 +717,59 @@ class MainViewModel @Inject constructor(
         val lat = properties?.latitude
         val lon = properties?.longitude
         val cityName = properties?.city ?: properties?.formattedAddress ?: "Unknown Location"
+
+        // Перевіряємо ліміт, використовуючи поточне значення з StateFlow, який вже є
+        // Або, якщо canAddNewLocation вже є, можна було б перевіряти його,
+        // але для негайної реакції в цій функції краще взяти актуальний розмір.
+        // Для цього нам потрібен StateFlow, який містить List<SavedLocation>.
+        // _savedLocationsFromDbFlow - це Flow, але ми можемо створити з нього StateFlow для цього.
+        // Або, простіше, використовувати кількість PagerItem.SavedPage з pagerItems.
+
+        val currentSavedPagesCount = pagerItems.value.filterIsInstance<PagerItem.SavedPage>().size
+        if (currentSavedPagesCount >= MAX_SAVED_LOCATIONS) {
+            Log.w(
+                "MainViewModel",
+                "Cannot add new location. Limit of $MAX_SAVED_LOCATIONS saved locations reached. Current count: $currentSavedPagesCount"
+            )
+            // TODO: Встановити StateFlow для показу повідомлення користувачеві в UI (наприклад, SnackBar)
+            // _showLimitReachedMessage.value = true (потім скинути)
+            return
+        }
+
         if (lat != null && lon != null) {
             viewModelScope.launch {
+                // Отримуємо поточний розмір списку збережених з БД для orderIndex
+                val currentSavedInDb =
+                    _savedLocationsFromDbFlow.first() // Отримуємо останній список з БД
+
                 val newSavedLocation = SavedLocation(
                     cityName = cityName.trim(),
                     countryCode = properties.countryCode?.uppercase(),
                     latitude = lat,
                     longitude = lon,
                     isCurrentActive = false, // Нова локація стає активною через setActiveLocation
-                    orderIndex = (_savedLocationsFromDbFlow.firstOrNull()?.size
-                        ?: 0) // Порядок для нової локації
+                    orderIndex = currentSavedInDb.size // Новий порядок
                 )
                 val newId = weatherRepository.addSavedLocation(newSavedLocation)
                 if (newId > 0L) {
-                    weatherRepository.setActiveLocation(newId.toInt()) // Встановлюємо активною в БД
-                    // Пейджер має оновитися через _savedLocationsFromDbFlow -> pagerItems
-                    // і потім _currentPagerIndex має встановитися на цю нову сторінку
-                    // Це може потребувати очікування оновлення pagerItems
+                    weatherRepository.setActiveLocation(newId.toInt())
+                    // Чекаємо, поки pagerItems оновиться, щоб включити нову локацію
                     val targetPageId = "saved_$newId"
-                    pagerItems.first { items -> items.any { it.id == targetPageId } } // Чекаємо, поки з'явиться
-                    val newPageIndex = pagerItems.value.indexOfFirst { it.id == targetPageId }
-                    if (newPageIndex != -1) _currentPagerIndex.value = newPageIndex
+                    try {
+                        pagerItems.first { items -> items.any { it.id == targetPageId } }
+                        val newPageIndex = pagerItems.value.indexOfFirst { it.id == targetPageId }
+                        if (newPageIndex != -1) {
+                            _currentPagerIndex.value = newPageIndex
+                        }
+                    } catch (e: NoSuchElementException) {
+                        Log.e(
+                            "MainViewModel",
+                            "New page $targetPageId not found in pagerItems after add."
+                        )
+                    }
                 } else if (newId == -2L) { // Вже існує
-                    val existing = (_savedLocationsFromDbFlow.firstOrNull()
-                        ?: emptyList()).find { it.latitude == lat && it.longitude == lon }
+                    val existing =
+                        currentSavedInDb.find { it.latitude == lat && it.longitude == lon }
                     existing?.let {
                         weatherRepository.setActiveLocation(it.id)
                         val existingPageIndex =
@@ -815,28 +789,21 @@ class MainViewModel @Inject constructor(
             val pageIndexOfDeleted =
                 pagerItems.value.indexOfFirst { it is PagerItem.SavedPage && it.location.id == locationId }
 
-            weatherRepository.deleteSavedLocation(locationId) // _savedLocationsFromDbFlow оновиться -> pagerItems оновиться
+            weatherRepository.deleteSavedLocation(locationId)
 
-            // Логіка вибору нової активної сторінки після видалення
-            // Чекаємо оновлення pagerItems
             val updatedPagerItems = pagerItems.first { currentItems ->
-                // Чекаємо, поки видалена локація зникне зі списку PagerItems
                 currentItems.none { it is PagerItem.SavedPage && it.location.id == locationId } || currentItems.isEmpty()
             }
 
             if (currentItemBeforeDelete is PagerItem.SavedPage && currentItemBeforeDelete.location.id == locationId) {
-                // Якщо видалили поточну активну збережену сторінку
                 if (updatedPagerItems.isNotEmpty()) {
-                    // Встановлюємо першу сторінку (ймовірно, геолокація або перша збережена) як активну
                     Log.d("MainViewModel", "Deleted active page. Setting pager to index 0.")
                     _currentPagerIndex.value = 0
-                    // Якщо перша сторінка - збережена, оновимо її isCurrentActive в БД
                     (updatedPagerItems.firstOrNull() as? PagerItem.SavedPage)?.let {
                         weatherRepository.setActiveLocation(it.location.id)
                     }
-                        ?: weatherRepository.setActiveLocation(0) // Якщо геолокація, знімаємо активність з усіх
+                        ?: weatherRepository.setActiveLocation(0)
                 } else {
-                    // Список порожній
                     Log.d(
                         "MainViewModel",
                         "All locations deleted. Pager index to 0 (or handle empty state)."
@@ -846,15 +813,12 @@ class MainViewModel @Inject constructor(
                         mapOf("empty_list_error" to Resource.Error<WeatherDataBundle>("No locations. Add a city."))
                 }
             } else if (pageIndexOfDeleted != -1 && pageIndexOfDeleted < _currentPagerIndex.value) {
-                // Якщо видалили сторінку, що була ПЕРЕД поточною активною, зсуваємо індекс
                 _currentPagerIndex.value = (_currentPagerIndex.value - 1).coerceAtLeast(0)
                 Log.d(
                     "MainViewModel",
                     "Deleted a page before current. Adjusted pager index to ${_currentPagerIndex.value}"
                 )
             } else {
-                // Видалили неактивну сторінку, поточний індекс може бути валідним
-                // або потрібно перевірити, чи він не виходить за межі оновленого списку
                 if (_currentPagerIndex.value >= updatedPagerItems.size && updatedPagerItems.isNotEmpty()) {
                     _currentPagerIndex.value = updatedPagerItems.size - 1
                 }
@@ -867,16 +831,10 @@ class MainViewModel @Inject constructor(
     }
 
     private fun hasLocationPermissionFlow(): Flow<Boolean> = flow {
-        // Этот flow будет эмитить значение каждый раз, когда кто-то на него подписывается
-        // или когда значение потенциально меняется. Для большей реактивности можно
-        // заставить его пере-эмитить при определенных событиях, но пока оставим так.
-        // Для простоты, можно сделать так, чтобы он эмитил значение при каждом вызове handlePermissionGranted
-        // или при изменении состояния разрешений.
-        // Но для combine, он должен эмитить последнее известное состояние.
         emit(hasLocationPermission())
-    }.distinctUntilChanged() // distinctUntilChanged здесь важен
+    }.distinctUntilChanged()
 
-    private fun hasLocationPermission(): Boolean { // Эта функция остается
+    private fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             application,
             Manifest.permission.ACCESS_FINE_LOCATION
@@ -887,10 +845,9 @@ class MainViewModel @Inject constructor(
                 ) == PackageManager.PERMISSION_GRANTED
     }
 
-    // Оновлений setPermissionError
     fun setPermissionError(message: String) {
         val errorKey = currentActivePagerItem.value?.id
-            ?: PagerItem.GeolocationPage().id // Використовуємо ID поточної сторінки або геолокації
+            ?: PagerItem.GeolocationPage().id
 
         _weatherDataStateMap.update { currentMap ->
             currentMap.toMutableMap().apply {
@@ -898,7 +855,6 @@ class MainViewModel @Inject constructor(
             }.toMap()
         }
 
-        // Якщо це помилка для геолокаційної сторінки, оновимо її стан
         if (errorKey == PagerItem.GeolocationPage().id && message.contains(
                 "permission",
                 ignoreCase = true
@@ -906,36 +862,29 @@ class MainViewModel @Inject constructor(
         ) {
             _geolocationPagerItemState.update {
                 it.copy(
-                    isLoadingDetails = false, // Важливо скинути isLoadingDetails при помилці дозволів
+                    isLoadingDetails = false,
                     fetchedCityName = if (message.contains("permanently denied")) "Permission Denied (Settings)" else "Permission Denied"
                 )
             }
         }
-        // Блок для _hasLocationPermissionState.value = false удален, так как _hasLocationPermissionState больше нет.
-        // hasLocationPermissionFlow() должен сам эмитить false, если разрешения нет.
         Log.e("MainViewModel", "Permission error set for $errorKey: $message")
     }
 
-    // Оновлений handlePermissionGranted
     fun handlePermissionGranted() {
         Log.d("MainViewModel", "handlePermissionGranted called by UI.")
 
         val geoPageId = PagerItem.GeolocationPage().id
 
-        // 1. СРАЗУ обновить состояние геолокационной страницы на "загрузка деталей".
-        // Это критически важно сделать ДО того, как _permissionCheckTrigger заставит pagerItems
-        // пересобраться и currentActivePagerItem среагирует.
         _geolocationPagerItemState.update {
             Log.d(
                 "MainViewModel",
                 "handlePermissionGranted: Updating _geolocationPagerItemState to initial loading state (isLoadingDetails=true)."
             )
-            // Используем конструктор PagerItem.GeolocationPage, чтобы сбросить все поля к начальным для загрузки
             PagerItem.GeolocationPage(
                 isLoadingDetails = true,
                 fetchedCityName = "Loading location...",
-                lat = 0.0, // Сбрасываем, т.к. будем получать новые
-                lon = 0.0, // Сбрасываем
+                lat = 0.0,
+                lon = 0.0,
                 fetchedCountryCode = null
             )
         }
@@ -944,8 +893,6 @@ class MainViewModel @Inject constructor(
             "Updated _geolocationPagerItemState to initial loading state due to permission grant."
         )
 
-        // 2. "Пинаем" триггер, чтобы combine (pagerItems) пересчитался с новым состоянием разрешения
-        // и с УЖЕ обновленным _geolocationPagerItemState (в котором isLoadingDetails=true).
         viewModelScope.launch {
             Log.d(
                 "MainViewModel",
@@ -954,33 +901,23 @@ class MainViewModel @Inject constructor(
             _permissionCheckTrigger.tryEmit(Unit)
         }
 
-        // 3. Очищаем предыдущую ошибку (если была) и устанавливаем состояние загрузки в _weatherDataStateMap.
-        // Это гарантирует, что WeatherScreen не подхватит старое сообщение "permission denied"
-        // и покажет индикатор загрузки.
         _weatherDataStateMap.update { currentMap ->
             val mutableMap = currentMap.toMutableMap()
             Log.d(
                 "MainViewModel",
                 "Setting _weatherDataStateMap for $geoPageId to Loading (permissions granted)."
             )
-            // Устанавливаем состояние загрузки, чтобы UI немедленно отреагировал
             mutableMap[geoPageId] =
                 Resource.Loading(message = "Permissions granted. Fetching location data...")
             mutableMap.toMap()
         }
         Log.d("MainViewModel", "_weatherDataStateMap for $geoPageId set to Loading.")
-
-        // 4. Теперь (пере)запрашиваем детали для геолокационной страницы.
-        // Эта функция асинхронно получит lat/lon, обновит _geolocationPagerItemState (isLoadingDetails станет false),
-        // что в свою очередь триггернет observeActivePagerItemToFetchWeather для загрузки погоды
-        // уже с правильными координатами и состоянием.
         fetchDetailsForGeolocationPage()
     }
 
     private fun tryInitialSetupOrLoadActive() {
         viewModelScope.launch {
             Log.d("MainViewModel", "tryInitialSetupOrLoadActive called.")
-            // Также "пинаем" триггер при инициализации
             Log.d(
                 "MainViewModel",
                 "Emitting to _permissionCheckTrigger from tryInitialSetupOrLoadActive"
@@ -1001,10 +938,9 @@ class MainViewModel @Inject constructor(
                     true
                 }
             }
-            // val stablePagerItems = pagerItems.value // Або просто беремо поточне значення після невеликої затримки, якщо .first {} занадто блокує
 
             val savedFromDb =
-                _savedLocationsFromDbFlow.first() // Це має бути досить швидко, оскільки StateFlow
+                _savedLocationsFromDbFlow.first()
 
             Log.d(
                 "MainViewModel",
@@ -1042,7 +978,6 @@ class MainViewModel @Inject constructor(
                             stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedFromDb.first().id }
                         if (firstSavedIndex != -1) {
                             targetIndexToSet = firstSavedIndex
-                            // Встановлюємо першу збережену активною в БД, якщо не було активної і геолокація не завантажилась
                             if (activeInDb == null) weatherRepository.setActiveLocation(savedFromDb.first().id)
                         }
                     }
@@ -1089,7 +1024,6 @@ class MainViewModel @Inject constructor(
                     "MainViewModel",
                     "InitialSetup: No saved locations and no permission. Setting permission error."
                 )
-                // Перевіряємо, чи вже є помилка, щоб не перезаписувати
                 val geoPageId = PagerItem.GeolocationPage().id
                 if (_weatherDataStateMap.value[geoPageId] !is Resource.Error || _weatherDataStateMap.value[geoPageId]?.message?.contains(
                         "permission"
@@ -1102,7 +1036,6 @@ class MainViewModel @Inject constructor(
                     "MainViewModel",
                     "InitialSetup: Could not determine a target page index. Current list size: ${stablePagerItems.size}"
                 )
-                // Якщо список не порожній, але індекс не встановлено, можливо, встановити 0 за замовчуванням, якщо є елементи.
                 if (stablePagerItems.isNotEmpty() && _currentPagerIndex.value >= stablePagerItems.size) {
                     _currentPagerIndex.value = 0
                 }
@@ -1110,22 +1043,14 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    // ЦЕЙ МЕТОД МАЄ БУТИ PUBLIC (без private)
     fun setCurrentPagerItemToSavedLocation(savedLocation: SavedLocation) {
         viewModelScope.launch {
             Log.d(
                 "MainViewModel",
                 "User selected saved location: ${savedLocation.cityName} from list. Setting active in DB."
             )
-            // Этот метод вызывается из ManageCitiesScreen. Он должен сделать город активным.
-            // При следующем запуске determineInitialPage все равно отдаст приоритет геолокации.
             weatherRepository.setActiveLocation(savedLocation.id)
-
-            // Ожидаем обновления pagerItems и находим индекс новой активной страницы
             try {
-                // Ждем, пока pagerItems обновится и будет содержать выбранную локацию,
-                // и она будет помечена как isCurrentActive в данных из БД (если это отражается в PagerItem)
-                // или просто ждем появления элемента с нужным ID.
                 val updatedPagerItems = pagerItems.first { items ->
                     items.any { it is PagerItem.SavedPage && it.location.id == savedLocation.id }
                 }
@@ -1141,7 +1066,6 @@ class MainViewModel @Inject constructor(
                     if (_currentPagerIndex.value != newPageIndex) {
                         _currentPagerIndex.value = newPageIndex
                     } else {
-                        // Если индекс уже тот, но погода не загружена (маловероятно после добавления/выбора)
                         fetchWeatherDataForPagerItem(updatedPagerItems[newPageIndex])
                     }
                 } else {
@@ -1178,32 +1102,35 @@ class MainViewModel @Inject constructor(
             val itemId = currentItem.id
 
             try {
+                // <<< НАЧАЛО ИЗМЕНЕНИЯ >>>
+                // Устанавливаем состояние Loading для ЛЮБОЙ страницы перед началом обновления.
+                // Это гарантирует, что .first { !isLoading } будет ждать завершения НОВОГО запроса.
+                _weatherDataStateMap.update { currentMap ->
+                    currentMap.toMutableMap().apply {
+                        this[itemId] =
+                            Resource.Loading(message = "Refreshing weather for ${currentItem.displayName}...")
+                    }.toMap()
+                }
+                Log.d("MainViewModel", "Refresh: Set _weatherDataStateMap to Loading for $itemId.")
+                // <<< КОНЕЦ ИЗМЕНЕНИЯ >>>
+
                 if (currentItem is PagerItem.GeolocationPage) {
                     Log.d(
                         "MainViewModel",
-                        "Refresh: Handling GeolocationPage. Setting weather state to Loading for $itemId before fetching details."
+                        "Refresh: Handling GeolocationPage. Calling fetchDetailsForGeolocationPage for $itemId."
                     )
-                    // <<< ИЗМЕНЕНИЕ ЗДЕСЬ >>>
-                    // Принудительно устанавливаем состояние Resource.Loading для геолокационной страницы.
-                    // Это гарантирует, что последующее ожидание в .first { ... } будет ждать
-                    // завершения НОВОГО цикла загрузки погоды, инициированного fetchDetailsForGeolocationPage -> observeActivePagerItemToFetchWeather.
-                    _weatherDataStateMap.update { currentMap ->
-                        currentMap.toMutableMap().apply {
-                            this[itemId] =
-                                Resource.Loading(message = "Refreshing location and weather...")
-                        }.toMap()
-                    }
-                    // Теперь вызываем fetchDetailsForGeolocationPage.
-                    // Она обновит детали, а изменение isLoadingDetails в _geolocationPagerItemState
-                    // должно через observeActivePagerItemToFetchWeather запустить fetchWeatherDataForPagerItem,
+                    // Для геолокации, fetchDetailsForGeolocationPage инициирует цепочку,
+                    // которая в итоге вызовет fetchWeatherDataForPagerItem,
                     // которая снова установит Loading, а затем Success/Error.
+                    // Предыдущая установка Loading здесь служит для немедленного UI отклика.
                     fetchDetailsForGeolocationPage()
                 } else { // Для сохраненной страницы (PagerItem.SavedPage)
                     Log.d(
                         "MainViewModel",
                         "Refresh: Handling SavedPage. Calling fetchWeatherDataForPagerItem for ${itemId}."
                     )
-                    // fetchWeatherDataForPagerItem сама установит Resource.Loading в начале своей работы.
+                    // fetchWeatherDataForPagerItem сама установит Resource.Loading (перезапишет наше),
+                    // а затем Success/Error.
                     fetchWeatherDataForPagerItem(currentItem)
                 }
 
@@ -1235,8 +1162,15 @@ class MainViewModel @Inject constructor(
                     "Exception during pull-to-refresh waiting logic for $itemId",
                     e
                 )
+                // Убедимся, что _isRefreshing сбрасывается даже при ошибке в ожидании
+                if (_isRefreshing.value) _isRefreshing.value = false
             } finally {
-                _isRefreshing.value = false
+                // _isRefreshing должен быть сброшен после того, как все операции завершены
+                // или если произошла ошибка, которая не была поймана выше.
+                // .first{} блокирует корутину, так что finally выполнится после ее завершения.
+                if (_isRefreshing.value) { // Дополнительная проверка, если вдруг уже false
+                    _isRefreshing.value = false
+                }
                 Log.i(
                     "MainViewModel",
                     "Pull-to-refresh finalized. _isRefreshing set to false for: ${currentItem.displayName}"
@@ -1248,22 +1182,70 @@ class MainViewModel @Inject constructor(
     fun updateTemperatureUnit(unit: TemperatureUnit) {
         viewModelScope.launch {
             userPreferencesRepository.updateTemperatureUnit(unit)
-            // Після зміни одиниць, потрібно перезавантажити погоду для поточної сторінки пейджера,
-            // оскільки API має повернути дані в нових одиницях (або ми маємо їх конвертувати)
             currentActivePagerItem.value?.let {
                 Log.d(
                     "MainViewModel",
                     "Temperature unit changed, refreshing weather for ${it.displayName}"
                 )
-                // Встановлюємо стан завантаження для поточної сторінки, щоб показати індикатор
                 _weatherDataStateMap.update { currentMap ->
                     currentMap.toMutableMap().apply {
                         this[it.id] = Resource.Loading(message = "Updating units...")
                     }.toMap()
                 }
-                // Повторний запит погоди
-                fetchWeatherDataForPagerItem(it) // Цей метод має враховувати поточні одиниці
+                fetchWeatherDataForPagerItem(it)
             }
+        }
+    }
+
+    fun moveSavedLocation(fromIndexInFilteredList: Int, toIndexInFilteredList: Int) {
+        viewModelScope.launch {
+            val currentSavedPages = pagerItems.value.filterIsInstance<PagerItem.SavedPage>()
+
+            if (fromIndexInFilteredList < 0 || fromIndexInFilteredList >= currentSavedPages.size ||
+                toIndexInFilteredList < 0 || toIndexInFilteredList >= currentSavedPages.size
+            ) {
+                Log.w(
+                    "MainViewModel",
+                    "moveSavedLocation: Invalid indices. From: $fromIndexInFilteredList, To: $toIndexInFilteredList, Size: ${currentSavedPages.size}"
+                )
+                return@launch
+            }
+
+            val listToReorder = currentSavedPages.map { it.location }.toMutableList()
+
+            val itemToMove = listToReorder.removeAt(fromIndexInFilteredList)
+            listToReorder.add(toIndexInFilteredList, itemToMove)
+
+            val updatedOrderLocations = listToReorder.mapIndexed { newOrderIndex, savedLocation ->
+                savedLocation.copy(orderIndex = newOrderIndex)
+            }
+
+            weatherRepository.updateSavedLocationsOrder(updatedOrderLocations)
+
+            val currentActiveItem = currentActivePagerItem.value
+            if (currentActiveItem is PagerItem.SavedPage) {
+                // Ожидаем обновления pagerItems после изменения порядка в БД
+                // Это нужно, чтобы получить правильный новый индекс активного элемента
+                val updatedPagerItemsAfterReorder = pagerItems.first { items ->
+                    // Проверяем, что порядок в pagerItems соответствует новому порядку updatedOrderLocations
+                    // Это упрощенная проверка; в идеале, нужно убедиться, что все элементы на своих местах.
+                    // Для простоты, можно просто подождать, пока ID активного элемента появится в списке.
+                    items.filterIsInstance<PagerItem.SavedPage>()
+                        .map { it.location.id } == updatedOrderLocations.map { it.id } ||
+                            items.any { it.id == currentActiveItem.id } // Убедимся, что активный элемент все еще там
+                }
+
+                val newIndexOfActive =
+                    updatedPagerItemsAfterReorder.indexOfFirst { it.id == currentActiveItem.id }
+                if (newIndexOfActive != -1 && _currentPagerIndex.value != newIndexOfActive) {
+                    _currentPagerIndex.value = newIndexOfActive
+                    Log.d(
+                        "MainViewModel",
+                        "Pager index updated to $newIndexOfActive after reorder due to active item shift."
+                    )
+                }
+            }
+            Log.d("MainViewModel", "Saved locations reordered in DB.")
         }
     }
 }

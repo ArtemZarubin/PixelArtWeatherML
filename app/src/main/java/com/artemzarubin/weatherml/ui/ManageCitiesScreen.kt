@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +66,7 @@ fun ManageCitiesScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val canAddLocation by viewModel.canAddNewLocation.collectAsState()
 
     Scaffold(
         topBar = {
@@ -105,6 +108,7 @@ fun ManageCitiesScreen(
                     else if (newText.isBlank()) viewModel.clearGeocodingResults()
                 },
                 label = { Text("Enter city name", style = MaterialTheme.typography.bodySmall) },
+                enabled = canAddLocation, // <--- ДЕАКТИВУЄМО ПОЛЕ
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyLarge,
@@ -114,6 +118,14 @@ fun ManageCitiesScreen(
                     keyboardController?.hide(); focusManager.clearFocus()
                 })
             )
+            if (!canAddLocation) {
+                Text(
+                    "You have reached the maximum number of saved locations (${MainViewModel.MAX_SAVED_LOCATIONS}).",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             // --- Autocomplete Results ---
@@ -177,24 +189,39 @@ fun ManageCitiesScreen(
             if (savedLocationPages.isEmpty()) {
                 Text("No locations saved yet.", style = MaterialTheme.typography.bodyMedium)
             } else {
-                LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(
-                        savedLocationPages,
-                        key = { savedPageItem -> savedPageItem.id }) { savedPageItem ->
+                LazyColumn(modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)) {
+                    // ВИКОРИСТОВУЄМО itemsIndexed
+                    itemsIndexed(
+                        items = savedLocationPages,
+                        key = { _, savedPageItem -> savedPageItem.id } // Ключ тепер приймає (index, item)
+                    ) { index, savedPageItem -> // Тепер index та savedPageItem доступні
                         SavedLocationRow(
                             location = savedPageItem.location,
-                            // isActive = currentActivePagerItem?.id == savedPageItem.id, // <--- ЦЕЙ РЯДОК ВИДАЛЯЄМО
+                            onMoveUp = {
+                                if (index > 0) {
+                                    viewModel.moveSavedLocation(index, index - 1)
+                                }
+                            },
+                            onMoveDown = {
+                                if (index < savedLocationPages.size - 1) {
+                                    viewModel.moveSavedLocation(index, index + 1)
+                                }
+                            },
                             onSelect = {
                                 Log.d(
                                     "ManageCitiesScreen",
                                     "Location selected: ${savedPageItem.location.cityName}"
                                 )
-                                viewModel.setCurrentPagerItemToSavedLocation(savedPageItem.location) // Викликаємо метод ViewModel
+                                viewModel.setCurrentPagerItemToSavedLocation(savedPageItem.location)
                                 onNavigateBack()
                             },
                             onDelete = {
                                 viewModel.deleteLocationAndUpdatePager(savedPageItem.location.id)
-                            }
+                            },
+                            canMoveUp = (index > 0),
+                            canMoveDown = (index < savedLocationPages.size - 1)
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                     }
@@ -206,39 +233,74 @@ fun ManageCitiesScreen(
 
 @Composable
 fun SavedLocationRow(
-    location: SavedLocation, // Тип параметра - SavedLocation
-    // isActive: Boolean, // БІЛЬШЕ НЕ ПОТРІБЕН
-    onSelect: () -> Unit,    // Клік по рядку все ще вибирає локацію і переходить на неї
-    onDelete: () -> Unit
+    location: SavedLocation,
+    onMoveUp: () -> Unit,    // Нова лямбда
+    onMoveDown: () -> Unit,  // Нова лямбда
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+    canMoveUp: Boolean,      // Чи можна рухати вгору
+    canMoveDown: Boolean     // Чи можна рухати вниз
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect) // Клік по всьому рядку для вибору
-            .padding(
-                vertical = 12.dp,
-                horizontal = 16.dp
-            ), // Збільшив горизонтальний відступ, оскільки немає іконки зліва
+            // .clickable(onClick = onSelect) // Клік по всьому рядку тепер не потрібен, якщо є кнопки
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Іконку чекбокса (IconButton з activeIconResId) ВИДАЛЕНО
-        // Spacer(modifier = Modifier.width(16.dp)) // Цей Spacer теж можна прибрати або зменшити
+        // --- Кнопки для зміни порядку ---
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(
+                onClick = onMoveUp,
+                enabled = canMoveUp,
+                modifier = Modifier.size(32.dp) // Однаковий розмір для кнопок
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.arrow_up), // Твоя іконка "Вгору"
+                    contentDescription = "Move Up",
+                    colorFilter = ColorFilter.tint(
+                        if (canMoveUp) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                )
+            }
+            IconButton(
+                onClick = onMoveDown,
+                enabled = canMoveDown,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.arrow_down), // Твоя іконка "Вниз"
+                    contentDescription = "Move Down",
+                    colorFilter = ColorFilter.tint(
+                        if (canMoveDown) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
 
+        // --- Назва міста (клікабельна для переходу) ---
         Text(
             text = "${location.cityName}${location.countryCode?.let { ", $it" } ?: ""}",
-            style = MaterialTheme.typography.bodyLarge, // Або твій стиль
-            modifier = Modifier.weight(1f), // Займає доступний простір
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onSelect) // Клік по тексту для вибору
+                .padding(vertical = 8.dp, horizontal = 8.dp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+        // Spacer(modifier = Modifier.width(8.dp)) // Можна прибрати, якщо Text займає weight(1f)
 
-        // Залишаємо тільки іконку видалення
-        IconButton(onClick = onDelete) {
+        // --- Кнопка видалення ---
+        IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
             Image(
-                painter = painterResource(id = R.drawable.trash_bin), // Твоя піксельна іконка смітника
+                painter = painterResource(id = R.drawable.trash_bin), // Твоя іконка
                 contentDescription = "Delete ${location.cityName}",
-                modifier = Modifier.size(32.dp), // Або 24.dp, залежно від твого дизайну
-                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground) // Або інший колір, якщо потрібно
+                modifier = Modifier.size(24.dp), // Зробимо трохи меншою, ніж кнопки порядку
+                colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
             )
         }
     }

@@ -476,12 +476,28 @@ fun WeatherScreen(
                 ) {
                     TopAppBar(
                         title = {
-                            Text(
-                                displayTitle, // displayTitle вже враховує currentActiveItem
-                                style = MaterialTheme.typography.headlineSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) { // Обгортаємо в Column
+                                Text(
+                                    displayTitle, // displayTitle вже враховує currentActiveItem
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                // Показуємо індикатор тільки якщо є що показувати і дані завантажені
+                                if (pagerItemsList.size > 1 && weatherStateForCurrentPage is Resource.Success<*>) {
+                                    PageIndicator(
+                                        numberOfPages = pagerItemsList.size,
+                                        currentPage = pagerState.currentPage,
+                                        modifier = Modifier.padding(top = 8.dp), // Мінімальний відступ
+                                        indicatorSize = 6.dp, // Дуже маленький розмір
+                                        spacing = 4.dp,       // Дуже маленькі відступи
+                                        activeColor = MaterialTheme.colorScheme.onPrimaryContainer, // Або інший колір, що добре видно на фоні TopAppBar
+                                        inactiveColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                            alpha = 0.6f
+                                        )
+                                    )
+                                }
+                            }
                         },
                         actions = {
                             IconButton(onClick = onNavigateToManageCities) {
@@ -614,18 +630,6 @@ fun WeatherScreen(
                 val currentActivePagerItemForIndicator by viewModel.currentActivePagerItem.collectAsState()
                 val weatherStateForActivePage =
                     currentActivePagerItemForIndicator?.id?.let { weatherDataMap[it] }
-
-                if (pagerItemsList.size > 1 && weatherStateForActivePage is Resource.Success<*>) { // Показуємо індикатори, тільки якщо сторінок більше однієї
-                    PageIndicator(
-                        numberOfPages = pagerItemsList.size,
-                        currentPage = pagerState.currentPage, // Використовуємо currentPage для негайного оновлення
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter) // Центруємо індикатор
-                            .padding(bottom = 9.dp), // Відступ знизу
-                        activeColor = MaterialTheme.colorScheme.onPrimaryContainer, // Або інший яскравий колір
-                        inactiveColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                    )
-                }
 
                 // Індикатор Pull-to-Refresh, розміщуємо його зверху по центру
                 PullRefreshIndicator(
