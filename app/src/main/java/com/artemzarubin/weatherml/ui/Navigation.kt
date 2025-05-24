@@ -8,13 +8,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
 import com.artemzarubin.weatherml.ui.mainscreen.WeatherScreen
-import com.artemzarubin.weatherml.ui.ManageCitiesScreen // Переконайся, що цей імпорт правильний
-import com.artemzarubin.weatherml.ui.SettingsScreen   // Імпорт нового екрану
 
 object AppDestinations {
     const val WEATHER_SCREEN_ROUTE = "weather"
     const val MANAGE_CITIES_ROUTE = "manage_cities"
     const val SETTINGS_SCREEN_ROUTE = "settings"
+    const val ABOUT_SCREEN_ROUTE = "about"
 }
 
 @Composable
@@ -42,13 +41,22 @@ fun AppNavHost(navController: NavHostController, mainViewModel: MainViewModel = 
                 }
             )
         }
-        // --- НОВИЙ COMPOSABLE ДЛЯ ЕКРАНУ НАЛАШТУВАНЬ ---
+
         composable(AppDestinations.SETTINGS_SCREEN_ROUTE) {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
-                viewModel = mainViewModel // <--- ПЕРЕДАЄМО mainViewModel
+                // Додаємо лямбду для переходу на екран "Про застосунок"
+                onNavigateToAbout = { navController.navigate(AppDestinations.ABOUT_SCREEN_ROUTE) }, // <--- НОВЕ
+                viewModel = mainViewModel // <--- ДОДАНО ПЕРЕДАЧУ VIEWMODEL
             )
         }
-        // --- КІНЕЦЬ НОВОГО COMPOSABLE ---
+
+
+        // --- НОВИЙ COMPOSABLE ДЛЯ ЕКРАНУ "ПРО ЗАСТОСУНОК" ---
+        composable(AppDestinations.ABOUT_SCREEN_ROUTE) {
+            AboutScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
     }
 }

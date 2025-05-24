@@ -42,7 +42,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             )
@@ -104,6 +104,10 @@ dependencies {
     // Hilt for Dependency Injection
     implementation(libs.hilt.android)
     implementation(libs.protolite.well.known.types)
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.junit.junit)
+    testImplementation(libs.junit.jupiter)
     kapt(libs.hilt.compiler) // Kapt for Hilt's annotation processor
     implementation(libs.hilt.navigation.compose) // For Hilt integration with Compose Navigation
 
@@ -119,6 +123,12 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling) // For Compose tooling in debug builds
     debugImplementation(libs.androidx.ui.test.manifest) // For UI tests
+    // New tests
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mockk.core)
+    testImplementation(libs.mockk.android)
+    testImplementation(libs.cash.turbine)
+
 
     // Location check
     implementation(libs.play.services.location) // For location

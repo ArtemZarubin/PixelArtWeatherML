@@ -39,9 +39,9 @@ data class GeoapifyPropertiesDto(
     @SerialName("lat") val latitude: Double?,
     @SerialName("lon") val longitude: Double?,
     @SerialName("formatted") val formattedAddress: String?, // Full formatted address
-    @SerialName("address_line1") val addressLine1: String?,
-    @SerialName("address_line2") val addressLine2: String?,
-    @SerialName("place_id") val placeId: String? // Unique ID for the place
+    @SerialName("address_line1") val addressLine1: String? = null,
+    @SerialName("address_line2") val addressLine2: String? = null,
+    @SerialName("place_id") val placeId: String? = null // Unique ID for the place
 )
 
 @Serializable

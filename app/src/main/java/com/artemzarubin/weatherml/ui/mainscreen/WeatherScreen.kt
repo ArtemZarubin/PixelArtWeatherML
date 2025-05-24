@@ -168,28 +168,39 @@ fun WeatherScreen(
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
         onResult = { permissions ->
-            // permissionsRequestedThisSession = true
             val fineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
             val coarseLocationGranted =
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+
+            permissionsRequestedThisSession =
+                true // Отмечаем, что попытка запроса была (успешная или нет)
+
             if (fineLocationGranted || coarseLocationGranted) {
-                showPermissionRationale = false // Дозволи надано, ховаємо UI помилки
-                permissionsRequestedThisSession = true // Позначимо, що взаємодія була
+                showPermissionRationale = false // Разрешения предоставлены, скрываем UI ошибки
                 viewModel.handlePermissionGranted()
             } else {
-                permissionsRequestedThisSession = true // Позначимо, що взаємодія була (відмова)
+                // Разрешения не предоставлены
                 val activity = context as? ComponentActivity
-                val canRequestAgain = locationPermissions.any { perm ->
-                    activity?.shouldShowRequestPermissionRationale(perm)
-                        ?: false // Якщо false, то "don't ask again"
+                // Проверяем, следует ли показывать объяснение (rationale) ПОСЛЕ ЭТОГО отказа.
+                // Если false, значит пользователь выбрал "Don't ask again" или политика запрещает.
+                val shouldShowRationaleAfterThisAttempt = locationPermissions.any { perm ->
+                    activity?.shouldShowRequestPermissionRationale(perm) ?: false
                 }
-                val isPermanentlyDenied = !canRequestAgain
+
+                // Отказ считается перманентным (с точки зрения возможности запроса через диалог),
+                // если систему НЕ просит показывать объяснение.
+                val isPermanentlyDeniedNow = !shouldShowRationaleAfterThisAttempt
+
+                Log.d(
+                    "WeatherScreen",
+                    "PermissionResult: Denied. ShouldShowRationaleAfter: $shouldShowRationaleAfterThisAttempt, IsPermanentlyDeniedNow: $isPermanentlyDeniedNow"
+                )
 
                 viewModel.setPermissionError(
-                    if (isPermanentlyDenied) "Location permission permanently denied. Please enable it in app settings."
+                    if (isPermanentlyDeniedNow) "Location permission permanently denied. Please enable it in app settings."
                     else "Location permission denied. Click to try again."
                 )
-                showPermissionRationale = true // Показуємо UI помилки
+                showPermissionRationale = true // Показываем UI ошибки/рационале
             }
         }
     )
@@ -206,48 +217,46 @@ fun WeatherScreen(
                 val allGranted = hasLocationPermission(context)
                 if (allGranted) {
                     Log.d("WeatherScreen", "Permissions GRANTED on ON_START.")
-                    if (showPermissionRationale) { // Если UI ошибки разрешений был виден
+                    if (showPermissionRationale) {
                         Log.d(
                             "WeatherScreen",
                             "Hiding permission rationale UI as permissions are now granted."
                         )
-                        showPermissionRationale = false // Скрываем его
+                        showPermissionRationale = false
                     }
-                    // Всегда вызываем handlePermissionGranted, если разрешения есть при старте,
-                    // чтобы ViewModel мог переинициализировать загрузку геолокации или очистить ошибки.
                     viewModel.handlePermissionGranted()
-                } else {
-                    // ... остальная логика для случая, когда разрешений НЕТ ...
-                    // Важно: если разрешения были "permanently denied", а пользователь только что вернулся из настроек,
-                    // этот блок (else) не должен выполняться, если allGranted стало true.
+                } else { // Разрешения НЕ предоставлены
                     Log.d("WeatherScreen", "Permissions NOT GRANTED on ON_START.")
                     val activity = context as? ComponentActivity
-                    val canRequestAgain = locationPermissions.any { perm ->
-                        activity?.shouldShowRequestPermissionRationale(perm) ?: false
-                    }
-                    // permissionsRequestedThisSession здесь важно, чтобы не показывать "permanently denied" до первого запроса
-                    val isPermanentlyDenied = !canRequestAgain && permissionsRequestedThisSession
 
-                    if (isPermanentlyDenied) {
-                        Log.d("WeatherScreen", "ON_START: Permissions seem permanently denied.")
-                        viewModel.setPermissionError("Location permission permanently denied. Please enable it in app settings.")
-                        showPermissionRationale = true
-                    } else if (permissionsRequestedThisSession && !allGranted) { // Была попытка запроса, но отказали (не перманентно)
-                        Log.d(
-                            "WeatherScreen",
-                            "ON_START: Permissions denied, but not permanently (or rationale pending)."
-                        )
-                        viewModel.setPermissionError("Location permission denied. Click to try again.")
-                        showPermissionRationale = true
-                    } else if (!permissionsRequestedThisSession && !allGranted) { // Еще не запрашивали в этой сессии
+                    // Если запрос в этой сессии еще не производился
+                    if (!permissionsRequestedThisSession) {
                         Log.d(
                             "WeatherScreen",
                             "ON_START: Requesting permissions for the first time this session."
                         )
                         locationPermissionLauncher.launch(locationPermissions)
+                    } else {
+                        // Запрос в этой сессии уже был (и, видимо, был отклонен, раз allGranted = false)
+                        // Проверяем, можно ли еще запрашивать или отказ перманентный
+                        val canStillRequestRationale = locationPermissions.any { perm ->
+                            activity?.shouldShowRequestPermissionRationale(perm) ?: false
+                        }
+                        val isEffectivelyPermanentlyDenied = !canStillRequestRationale
+
+                        Log.d(
+                            "WeatherScreen",
+                            "ON_START: Already requested this session. CanStillRequestRationale: $canStillRequestRationale, IsEffectivelyPermanentlyDenied: $isEffectivelyPermanentlyDenied"
+                        )
+
+                        if (isEffectivelyPermanentlyDenied) {
+                            viewModel.setPermissionError("Location permission permanently denied. Please enable it in app settings.")
+                        } else {
+                            viewModel.setPermissionError("Location permission denied. Click to try again.")
+                        }
+                        showPermissionRationale =
+                            true // Показываем UI ошибки, если разрешения все еще не даны
                     }
-                    // Если showPermissionRationale уже true из-за предыдущего состояния, и разрешения все еще не даны,
-                    // то UI ошибки останется видимым, что корректно.
                 }
             }
         }
@@ -547,9 +556,10 @@ fun WeatherScreen(
                 ) == true
             ) {
                 PermissionErrorUI(
-                    message = permissionErrorMessageFromState, // Це вже String
+                    message = permissionErrorMessageFromState, // Это уже String
                     onGrantPermission = {
-                        // permissionsRequestedThisSession = false // Можна прибрати, якщо логіка в onResult лаунчера працює
+                        permissionsRequestedThisSession =
+                            false // <--- ЗМІНЮЄМО ТУТ, ПЕРЕД ВИКЛИКОМ ЛАУНЧЕРА
                         locationPermissionLauncher.launch(locationPermissions)
                     },
                     onOpenSettings = {
@@ -564,6 +574,7 @@ fun WeatherScreen(
                         showPermissionRationale = false // Скидаємо після переходу в налаштування
                     },
                     context = context,
+                    // ВОТ КЛЮЧЕВОЙ МОМЕНТ:
                     isPermanentlyDenied = permissionErrorMessageFromState.contains(
                         "permanently denied",
                         ignoreCase = true

@@ -20,6 +20,7 @@ import com.artemzarubin.weatherml.domain.model.WeatherDataBundle
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -77,12 +78,13 @@ sealed class PagerItem {
     }
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val weatherRepository: WeatherRepository,
     private val locationTracker: LocationTracker,
-    private val userPreferencesRepository: UserPreferencesRepository, // <--- НОВА ЗАЛЕЖНІСТЬ
-    private val application: Application
+    private val application: Application, // <--- ТРЕТІЙ АРГУМЕНТ
+    private val userPreferencesRepository: UserPreferencesRepository // <--- ЧЕТВЕРТИЙ АРГУМЕНТ (якщо ти його додав)
 ) : ViewModel() {
 
     companion object {
@@ -716,7 +718,7 @@ class MainViewModel @Inject constructor(
         autocompleteJob?.cancel()
     }
 
-    fun onCitySuggestionSelected(cityGeoData: GeoapifyFeatureDto) {
+    internal open fun onCitySuggestionSelected(cityGeoData: GeoapifyFeatureDto) {
         val properties = cityGeoData.properties
         val lat = properties?.latitude
         val lon = properties?.longitude
@@ -787,7 +789,7 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun deleteLocationAndUpdatePager(locationId: Int) {
+    internal open fun deleteLocationAndUpdatePager(locationId: Int) {
         viewModelScope.launch {
             val currentItemBeforeDelete = currentActivePagerItem.value
             val pageIndexOfDeleted =
@@ -838,7 +840,7 @@ class MainViewModel @Inject constructor(
         emit(hasLocationPermission())
     }.distinctUntilChanged()
 
-    private fun hasLocationPermission(): Boolean {
+    internal open fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             application,
             Manifest.permission.ACCESS_FINE_LOCATION
@@ -876,17 +878,42 @@ class MainViewModel @Inject constructor(
 
     fun handlePermissionGranted() {
         Log.d("MainViewModel", "handlePermissionGranted called by UI.")
-
         val geoPageId = PagerItem.GeolocationPage().id
 
+        // Очистим предыдущую ошибку разрешений для geoPageId, если она была.
+        // Это позволит избежать показа старой ошибки, если разрешения были даны из настроек.
+        _weatherDataStateMap.update { currentMap ->
+            val mutableMap = currentMap.toMutableMap()
+            val currentResource = mutableMap[geoPageId]
+            if (currentResource is Resource.Error && currentResource.message?.contains(
+                    "permission",
+                    ignoreCase = true
+                ) == true
+            ) {
+                Log.d(
+                    "MainViewModel",
+                    "Clearing previous permission error for $geoPageId as permissions are now granted."
+                )
+                // Можно установить временное состояние загрузки или просто удалить,
+                // чтобы fetchDetailsForGeolocationPage установил свое актуальное состояние.
+                // Если просто удалить, то не будет промежуточного Loading(message="Permissions granted...")
+                mutableMap.remove(geoPageId)
+                // Либо, если хотите явный индикатор, но без специфичного сообщения "Permissions granted":
+                // mutableMap[geoPageId] = Resource.Loading()
+            }
+            mutableMap.toMap()
+        }
+
+        // Сбрасываем состояние геолокационной страницы в начальное состояние загрузки.
+        // Это важно, чтобы данные (координаты, название города) были запрошены заново.
         _geolocationPagerItemState.update {
             Log.d(
                 "MainViewModel",
                 "handlePermissionGranted: Updating _geolocationPagerItemState to initial loading state (isLoadingDetails=true)."
             )
-            PagerItem.GeolocationPage(
+            PagerItem.GeolocationPage( // Сброс в полностью начальное состояние
                 isLoadingDetails = true,
-                fetchedCityName = "Loading location...",
+                fetchedCityName = "Loading location...", // Начальный текст загрузки
                 lat = 0.0,
                 lon = 0.0,
                 fetchedCountryCode = null
@@ -897,6 +924,7 @@ class MainViewModel @Inject constructor(
             "Updated _geolocationPagerItemState to initial loading state due to permission grant."
         )
 
+        // Триггер для обновления списка pagerItems, если геолокационная страница должна добавиться/удалиться
         viewModelScope.launch {
             Log.d(
                 "MainViewModel",
@@ -905,17 +933,8 @@ class MainViewModel @Inject constructor(
             _permissionCheckTrigger.tryEmit(Unit)
         }
 
-        _weatherDataStateMap.update { currentMap ->
-            val mutableMap = currentMap.toMutableMap()
-            Log.d(
-                "MainViewModel",
-                "Setting _weatherDataStateMap for $geoPageId to Loading (permissions granted)."
-            )
-            mutableMap[geoPageId] =
-                Resource.Loading(message = "Permissions granted. Fetching location data...")
-            mutableMap.toMap()
-        }
-        Log.d("MainViewModel", "_weatherDataStateMap for $geoPageId set to Loading.")
+        // Запускаем процесс получения деталей геолокации (координат и названия города).
+        // Эта функция, в свою очередь, инициирует загрузку погоды, если это активная страница.
         fetchDetailsForGeolocationPage()
     }
 

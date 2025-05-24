@@ -3,7 +3,6 @@
 [versions]
 # Android Gradle Plugin and Kotlin versions are derived from the current project setup.
 agp = "8.10.0"
-foundationPager = "1.0.0-alpha07"
 kotlin = "2.1.20"
 room = "2.7.1"
 ksp = "2.1.20-2.0.1"
@@ -36,7 +35,6 @@ tensorflowLite = "2.17.0"
 tensorflowLiteSupport = "0.5.0"
 playServicesLocation = "21.3.0"
 protoliteWellKnownTypes = "18.0.1" # Check for the latest version
-googleServicesPlugin = "4.4.2"
 
 androidxMaterialIcons = "1.7.8"
 
@@ -48,6 +46,13 @@ composeMaterial = "1.8.2"
 
 # Settings
 androidxDatastore = "1.1.7"
+
+# Testing
+kotlinxCoroutinesTest = "1.8.0"
+mockk = "1.14.2"
+turbine = "1.2.0"
+junitJupiter = "5.8.1"
+junitVersion = "4.12"
 
 [libraries]
 # AndroidX Core
@@ -69,6 +74,11 @@ androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "a
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+# New
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
+mockk-core = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "mockk" }
+cash-turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 
 # New Libraries
 # Lifecycle Components
@@ -117,6 +127,8 @@ androidx-compose-material = { group = "androidx.compose.material", name = "mater
 
 # Settings
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "androidxDatastore" }
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
+junit-junit = { group = "junit", name = "junit", version.ref = "junitVersion" }
 
 [plugins]
 # Existing plugins from the project
@@ -132,6 +144,3 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 
 # KSP Plugin
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
-
-# Google Search Plugin
-google-services = { id = "com.google.gms.google-services", version.ref = "googleServicesPlugin" }

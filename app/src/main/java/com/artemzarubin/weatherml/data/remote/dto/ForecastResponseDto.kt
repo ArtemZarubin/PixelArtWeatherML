@@ -19,11 +19,11 @@ data class ForecastItemDto(
     @SerialName("main") val main: MainWeatherInfoDto?, // Reusing MainWeatherInfoDto from CurrentWeatherResponseDto.kt
     // Sometimes fields like temp_kf might be present here.
     @SerialName("weather") val weather: List<WeatherConditionDto>?, // Reusing WeatherConditionDto
-    @SerialName("clouds") val clouds: CloudsDto?, // Reusing CloudsDto
-    @SerialName("wind") val wind: WindDto?, // Reusing WindDto
-    @SerialName("visibility") val visibility: Int?, // Average visibility, metres
-    @SerialName("pop") val probabilityOfPrecipitation: Double?, // Probability of precipitation (0 to 1)
-    @SerialName("sys") val sys: ForecastSysDto?, // Contains part of day (d or n)
+    @SerialName("clouds") val clouds: CloudsDto? = null, // Reusing CloudsDto
+    @SerialName("wind") val wind: WindDto? = null, // Reusing WindDto
+    @SerialName("visibility") val visibility: Int? = null, // Average visibility, metres
+    @SerialName("pop") val probabilityOfPrecipitation: Double? = null, // Probability of precipitation (0 to 1)
+    @SerialName("sys") val sys: ForecastSysDto? = null, // Contains part of day (d or n)
     @SerialName("dt_txt") val dateTimeText: String?, // Data/time of calculation, ISO, UTC e.g., "2020-05-06 18:00:00"
 
     // Optional: Rain information for the last 3 hours (if present in API)

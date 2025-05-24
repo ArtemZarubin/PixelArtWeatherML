@@ -302,7 +302,7 @@ fun SavedLocationRow(
             Image(
                 painter = painterResource(id = R.drawable.trash_bin), // Твоя іконка
                 contentDescription = "Delete ${location.cityName}",
-                modifier = Modifier.size(24.dp), // Зробимо трохи меншою, ніж кнопки порядку
+                modifier = Modifier.size(32.dp), // Зробимо трохи меншою, ніж кнопки порядку
                 colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onBackground)
             )
         }
