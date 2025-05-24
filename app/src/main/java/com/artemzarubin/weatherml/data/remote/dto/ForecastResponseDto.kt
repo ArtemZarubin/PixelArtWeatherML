@@ -55,7 +55,7 @@ data class ForecastSysDto( // System information within a forecast item
 )
 
 @Serializable
-data class CityDto( // Це частина ForecastResponseDto
+data class CityDto(
     @SerialName("id") val id: Int?,
     @SerialName("name") val name: String?,
     @SerialName("coord") val coordinates: CoordinatesDto?, // <--- МАЄ БУТИ NULLABLE

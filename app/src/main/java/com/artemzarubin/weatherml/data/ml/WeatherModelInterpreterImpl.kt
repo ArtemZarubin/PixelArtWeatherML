@@ -1,3 +1,5 @@
+@file:Suppress("ConstPropertyName")
+
 package com.artemzarubin.weatherml.data.ml
 
 import android.content.Context
@@ -20,6 +22,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
+@Suppress("SameParameterValue")
 @Singleton
 class WeatherModelInterpreterImpl @Inject constructor(
     @ApplicationContext private val context: Context
@@ -32,9 +35,9 @@ class WeatherModelInterpreterImpl @Inject constructor(
 
     // --- ЗАМІНИ ЦІ РЯДКИ НА ТІ, ЩО ОТРИМАВ З PYTHON ---
     private val scalerXMean: FloatArray =
-        floatArrayOf(11.94444380f, 0.73472059f, 10.81672393f, 10.35828539f, 1002.91814481f)
+        floatArrayOf(11.944444f, 0.7347206f, 10.816724f, 10.358285f, 1002.91815f)
     private val scalerXScale: FloatArray =
-        floatArrayOf(9.53930538f, 0.19536608f, 6.92619091f, 4.18863188f, 118.21950300f)
+        floatArrayOf(9.539306f, 0.19536608f, 6.926191f, 4.188632f, 118.219505f)
 
     private val numericFeatureNamesForXScaling: List<String> = listOf(
         "Temperature (C)",
@@ -45,8 +48,8 @@ class WeatherModelInterpreterImpl @Inject constructor(
     )
 
     private companion object {
-        private const val scalerYMean: Float = 10.87010597f // ЗАМІНИ НА ЗНАЧЕННЯ З PYTHON
-        private const val scalerYScale: Float = 10.68180025f // ЗАМІНИ НА ЗНАЧЕННЯ З PYTHON
+        private const val scalerYMean: Float = 10.870106f // ЗАМІНИ НА ЗНАЧЕННЯ З PYTHON
+        private const val scalerYScale: Float = 10.6818f // ЗАМІНИ НА ЗНАЧЕННЯ З PYTHON
     }
     // --- КІНЕЦЬ НОВИХ ПАРАМЕТРІВ СКЕЙЛЕРА ---
 

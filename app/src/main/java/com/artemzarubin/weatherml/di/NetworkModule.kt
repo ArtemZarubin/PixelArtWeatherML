@@ -12,11 +12,9 @@ import com.artemzarubin.weatherml.domain.location.LocationTracker
 import com.artemzarubin.weatherml.domain.ml.WeatherModelInterpreter
 import com.artemzarubin.weatherml.domain.repository.WeatherRepository
 import com.artemzarubin.weatherml.util.ConnectivityObserver
-import com.artemzarubin.weatherml.util.NetworkConnectivityObserverImpl
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -131,15 +129,4 @@ object NetworkModule {
         }
         return interpreter
     }
-}
-
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class ConnectivityModule { // Використовуємо abstract class та @Binds
-
-    @Binds
-    @Singleton
-    abstract fun bindConnectivityObserver(
-        networkConnectivityObserverImpl: NetworkConnectivityObserverImpl
-    ): ConnectivityObserver
 }

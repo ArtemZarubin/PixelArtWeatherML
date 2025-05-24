@@ -1,3 +1,5 @@
+@file:Suppress("KotlinConstantConditions")
+
 package com.artemzarubin.weatherml.ui.mainscreen
 
 import android.Manifest
@@ -10,7 +12,6 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -130,7 +131,6 @@ fun PageIndicator(
 
 @OptIn(
     ExperimentalMaterial3Api::class,
-    ExperimentalFoundationApi::class,
     ExperimentalMaterialApi::class
 )
 @Composable
@@ -162,8 +162,6 @@ fun WeatherScreen(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
     )
-
-    val weatherDataMapFromVM by viewModel.weatherDataStateMap.collectAsState()
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -573,7 +571,6 @@ fun WeatherScreen(
                         }
                         showPermissionRationale = false // Скидаємо після переходу в налаштування
                     },
-                    context = context,
                     // ВОТ КЛЮЧЕВОЙ МОМЕНТ:
                     isPermanentlyDenied = permissionErrorMessageFromState.contains(
                         "permanently denied",
@@ -638,10 +635,6 @@ fun WeatherScreen(
                 }
 
                 // --- Page Indicator ---
-                val currentActivePagerItemForIndicator by viewModel.currentActivePagerItem.collectAsState()
-                val weatherStateForActivePage =
-                    currentActivePagerItemForIndicator?.id?.let { weatherDataMap[it] }
-
                 // Індикатор Pull-to-Refresh, розміщуємо його зверху по центру
                 PullRefreshIndicator(
                     refreshing = isRefreshing,
@@ -821,7 +814,6 @@ fun PermissionErrorUI(
     message: String,
     onGrantPermission: () -> Unit,
     onOpenSettings: () -> Unit,
-    context: Context,
     isPermanentlyDenied: Boolean
 ) {
     Box(

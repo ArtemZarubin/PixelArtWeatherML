@@ -104,10 +104,6 @@ dependencies {
     // Hilt for Dependency Injection
     implementation(libs.hilt.android)
     implementation(libs.protolite.well.known.types)
-    testImplementation(libs.junit.jupiter)
-    testImplementation(libs.junit.jupiter)
-    testImplementation(libs.junit.junit)
-    testImplementation(libs.junit.jupiter)
     kapt(libs.hilt.compiler) // Kapt for Hilt's annotation processor
     implementation(libs.hilt.navigation.compose) // For Hilt integration with Compose Navigation
 

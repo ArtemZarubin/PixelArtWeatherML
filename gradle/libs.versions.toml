@@ -5,7 +5,7 @@
 agp = "8.10.0"
 kotlin = "2.1.20"
 room = "2.7.1"
-ksp = "2.1.20-2.0.1"
+ksp = "2.1.21-2.0.1"
 
 navigationCompose = "2.9.0" # Jetpack Compose Navigation
 # The Compose Compiler version must be compatible with the Kotlin version.
@@ -26,7 +26,7 @@ espressoCore = "3.6.1"
 # New Libraries - Initial stable versions.
 hilt = "2.51.1"
 hiltNavigationCompose = "1.2.0"
-kotlinxCoroutines = "1.8.0"
+kotlinxCoroutines = "1.9.0"
 kotlinxSerializationJson = "1.7.3"
 retrofit = "2.11.0"
 retrofitKotlinxSerializationConverter = "1.0.0"
@@ -48,11 +48,9 @@ composeMaterial = "1.8.2"
 androidxDatastore = "1.1.7"
 
 # Testing
-kotlinxCoroutinesTest = "1.8.0"
+kotlinxCoroutinesTest = "1.9.0"
 mockk = "1.14.2"
 turbine = "1.2.0"
-junitJupiter = "5.8.1"
-junitVersion = "4.12"
 
 [libraries]
 # AndroidX Core
@@ -127,8 +125,6 @@ androidx-compose-material = { group = "androidx.compose.material", name = "mater
 
 # Settings
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "androidxDatastore" }
-junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
-junit-junit = { group = "junit", name = "junit", version.ref = "junitVersion" }
 
 [plugins]
 # Existing plugins from the project

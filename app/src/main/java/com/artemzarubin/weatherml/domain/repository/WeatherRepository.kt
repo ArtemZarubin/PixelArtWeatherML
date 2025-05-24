@@ -1,3 +1,5 @@
+@file:Suppress("KDocUnresolvedReference", "KDocUnresolvedReference", "KDocUnresolvedReference")
+
 package com.artemzarubin.weatherml.domain.repository
 
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyFeatureDto

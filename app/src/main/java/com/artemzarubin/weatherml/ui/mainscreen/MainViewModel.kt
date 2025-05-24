@@ -22,7 +22,6 @@ import com.artemzarubin.weatherml.util.Resource
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,7 +35,6 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
@@ -80,7 +78,7 @@ sealed class PagerItem {
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class MainViewModel @Inject constructor(
+open class MainViewModel @Inject constructor(
     private val weatherRepository: WeatherRepository,
     private val locationTracker: LocationTracker,
     private val application: Application, // <--- ТРЕТІЙ АРГУМЕНТ
@@ -103,7 +101,7 @@ class MainViewModel @Inject constructor(
 
     private val _savedLocationsFromDbFlow =
         weatherRepository.getSavedLocations().distinctUntilChanged()
-    val _geolocationPagerItemState =
+    private val _geolocationPagerItemState =
         MutableStateFlow(PagerItem.GeolocationPage(isLoadingDetails = false)) // isLoadingDetails = false спочатку
 
     private val _currentPagerIndex = MutableStateFlow(0)
@@ -316,7 +314,7 @@ class MainViewModel @Inject constructor(
             newActiveLocationIdToSetInDb?.let { activeId ->
                 val currentActiveInDb = (_savedLocationsFromDbFlow.firstOrNull()
                     ?: emptyList()).find { it.isCurrentActive }
-                val currentDbActiveId = if (currentActiveInDb != null) currentActiveInDb.id else 0
+                val currentDbActiveId = currentActiveInDb?.id ?: 0
                 if (activeId == 0 && currentActiveInDb == null) {
                     // Ничего не делаем
                 } else if (currentDbActiveId != activeId) {
@@ -362,21 +360,6 @@ class MainViewModel @Inject constructor(
             }
         }
     }
-
-    private fun tryFirstSavedOrGeo(
-        currentPagerItems: List<PagerItem>,
-        savedFromDb: List<SavedLocation>
-    ) {
-        if (savedFromDb.isNotEmpty()) {
-            val firstSavedIndex =
-                currentPagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedFromDb.first().id }
-            if (firstSavedIndex != -1) _currentPagerIndex.value = firstSavedIndex
-        } else if (hasLocationPermission()) {
-            val geoIndex = currentPagerItems.indexOfFirst { it is PagerItem.GeolocationPage }
-            if (geoIndex != -1) _currentPagerIndex.value = geoIndex
-        }
-    }
-
 
     private fun observeActivePagerItemToFetchWeather() {
         currentActivePagerItem
@@ -443,7 +426,7 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun fetchDetailsForGeolocationPage() {
+    private fun fetchDetailsForGeolocationPage() {
         if (!hasLocationPermission()) {
             Log.w(
                 "MainViewModel",
@@ -483,7 +466,7 @@ class MainViewModel @Inject constructor(
                 "MainViewModel",
                 "fetchDetailsForGeolocationPage: COROUTINE STARTED for $geoPageId."
             )
-            if (_geolocationPagerItemState.value.isLoadingDetails == false || _geolocationPagerItemState.value.fetchedCityName == "My Location") {
+            if (!_geolocationPagerItemState.value.isLoadingDetails || _geolocationPagerItemState.value.fetchedCityName == "My Location") {
                 _geolocationPagerItemState.update {
                     Log.d(
                         "MainViewModel",
@@ -572,7 +555,7 @@ class MainViewModel @Inject constructor(
                         )
                         currentMap.toMutableMap().apply {
                             this[geoPageId] =
-                                Resource.Error<WeatherDataBundle>("Could not get current geolocation (null from tracker).")
+                                Resource.Error("Could not get current geolocation (null from tracker).")
                         }.toMap()
                     }
                 }
@@ -599,7 +582,7 @@ class MainViewModel @Inject constructor(
                     )
                     currentMap.toMutableMap().apply {
                         this[geoPageId] =
-                            Resource.Error<WeatherDataBundle>("Error fetching geolocation details: ${e.message}")
+                            Resource.Error("Error fetching geolocation details: ${e.message}")
                     }.toMap()
                 }
             } finally {
@@ -816,7 +799,7 @@ class MainViewModel @Inject constructor(
                     )
                     _currentPagerIndex.value = 0
                     _weatherDataStateMap.value =
-                        mapOf("empty_list_error" to Resource.Error<WeatherDataBundle>("No locations. Add a city."))
+                        mapOf("empty_list_error" to Resource.Error("No locations. Add a city."))
                 }
             } else if (pageIndexOfDeleted != -1 && pageIndexOfDeleted < _currentPagerIndex.value) {
                 _currentPagerIndex.value = (_currentPagerIndex.value - 1).coerceAtLeast(0)
@@ -836,10 +819,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private fun hasLocationPermissionFlow(): Flow<Boolean> = flow {
-        emit(hasLocationPermission())
-    }.distinctUntilChanged()
-
     internal open fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             application,
@@ -857,7 +836,7 @@ class MainViewModel @Inject constructor(
 
         _weatherDataStateMap.update { currentMap ->
             currentMap.toMutableMap().apply {
-                this[errorKey] = Resource.Error<WeatherDataBundle>(message = message)
+                this[errorKey] = Resource.Error(message = message)
             }.toMap()
         }
 
@@ -936,134 +915,6 @@ class MainViewModel @Inject constructor(
         // Запускаем процесс получения деталей геолокации (координат и названия города).
         // Эта функция, в свою очередь, инициирует загрузку погоды, если это активная страница.
         fetchDetailsForGeolocationPage()
-    }
-
-    private fun tryInitialSetupOrLoadActive() {
-        viewModelScope.launch {
-            Log.d("MainViewModel", "tryInitialSetupOrLoadActive called.")
-            Log.d(
-                "MainViewModel",
-                "Emitting to _permissionCheckTrigger from tryInitialSetupOrLoadActive"
-            )
-            _permissionCheckTrigger.tryEmit(Unit)
-
-            val initialPermission = hasLocationPermission()
-            Log.d(
-                "MainViewModel",
-                "tryInitialSetupOrLoadActive: Initial permission state: $initialPermission"
-            )
-
-            val stablePagerItems = pagerItems.first { items ->
-                val permissionGrantedNow = hasLocationPermission()
-                if (permissionGrantedNow) {
-                    items.any { it is PagerItem.GeolocationPage } || items.any { it is PagerItem.SavedPage }
-                } else {
-                    true
-                }
-            }
-
-            val savedFromDb =
-                _savedLocationsFromDbFlow.first()
-
-            Log.d(
-                "MainViewModel",
-                "InitialSetup: Saved in DB: ${savedFromDb.size}, Stable PagerItems: ${stablePagerItems.size}, HasPermission: ${hasLocationPermission()}"
-            )
-
-            val activeInDb = savedFromDb.find { it.isCurrentActive }
-
-            var targetIndexToSet: Int? = null
-
-            if (hasLocationPermission()) {
-                val geoPageIndex = stablePagerItems.indexOfFirst { it is PagerItem.GeolocationPage }
-                if (geoPageIndex != -1) {
-                    Log.d(
-                        "MainViewModel",
-                        "InitialSetup: Has permission. Setting Geolocation (index $geoPageIndex) as current page."
-                    )
-                    targetIndexToSet = geoPageIndex
-                    val geoPageState = _geolocationPagerItemState.value
-                    if (geoPageState.isLoadingDetails || geoPageState.fetchedCityName == "My Location" || geoPageState.fetchedCityName == "Loading location...") {
-                        fetchDetailsForGeolocationPage()
-                    }
-                } else {
-                    Log.w(
-                        "MainViewModel",
-                        "InitialSetup: Has permission, but GeolocationPage not found in stablePagerItems. Fallback."
-                    )
-                    if (activeInDb != null) {
-                        val activeIndex =
-                            stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == activeInDb.id }
-                        if (activeIndex != -1) targetIndexToSet = activeIndex
-                    }
-                    if (targetIndexToSet == null && savedFromDb.isNotEmpty()) {
-                        val firstSavedIndex =
-                            stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedFromDb.first().id }
-                        if (firstSavedIndex != -1) {
-                            targetIndexToSet = firstSavedIndex
-                            if (activeInDb == null) weatherRepository.setActiveLocation(savedFromDb.first().id)
-                        }
-                    }
-                }
-            } else if (activeInDb != null) {
-                val activeIndex =
-                    stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == activeInDb.id }
-                if (activeIndex != -1) {
-                    Log.d(
-                        "MainViewModel",
-                        "InitialSetup: No permission, using active from DB: ${activeInDb.cityName} at index $activeIndex."
-                    )
-                    targetIndexToSet = activeIndex
-                } else {
-                    Log.w(
-                        "MainViewModel",
-                        "InitialSetup: Active from DB not found in stablePagerItems. Fallback to first saved."
-                    )
-                    if (savedFromDb.isNotEmpty()) {
-                        val firstSavedIndex =
-                            stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedFromDb.first().id }
-                        if (firstSavedIndex != -1) targetIndexToSet = firstSavedIndex
-                    }
-                }
-            } else if (savedFromDb.isNotEmpty()) {
-                Log.d(
-                    "MainViewModel",
-                    "InitialSetup: No permission, no active in DB, using first saved: ${savedFromDb.first().cityName}"
-                )
-                val firstSavedIndex =
-                    stablePagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedFromDb.first().id }
-                if (firstSavedIndex != -1) {
-                    targetIndexToSet = firstSavedIndex
-                    weatherRepository.setActiveLocation(savedFromDb.first().id)
-                }
-            }
-
-            if (targetIndexToSet != null) {
-                if (_currentPagerIndex.value != targetIndexToSet) {
-                    _currentPagerIndex.value = targetIndexToSet
-                }
-            } else if (!hasLocationPermission() && savedFromDb.isEmpty()) {
-                Log.d(
-                    "MainViewModel",
-                    "InitialSetup: No saved locations and no permission. Setting permission error."
-                )
-                val geoPageId = PagerItem.GeolocationPage().id
-                if (_weatherDataStateMap.value[geoPageId] !is Resource.Error || _weatherDataStateMap.value[geoPageId]?.message?.contains(
-                        "permission"
-                    ) != true
-                ) {
-                    setPermissionError("Location permission is required to show weather. Please grant permission or add a city.")
-                }
-            } else {
-                Log.w(
-                    "MainViewModel",
-                    "InitialSetup: Could not determine a target page index. Current list size: ${stablePagerItems.size}"
-                )
-                if (stablePagerItems.isNotEmpty() && _currentPagerIndex.value >= stablePagerItems.size) {
-                    _currentPagerIndex.value = 0
-                }
-            }
-        }
     }
 
     fun setCurrentPagerItemToSavedLocation(savedLocation: SavedLocation) {

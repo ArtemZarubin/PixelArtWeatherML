@@ -1,13 +1,15 @@
+@file:Suppress("KDocUnresolvedReference")
+
 package com.artemzarubin.weatherml.data.remote
 
 import com.artemzarubin.weatherml.data.remote.dto.CurrentWeatherResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.ForecastResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyAutocompleteResponseDto
 import com.artemzarubin.weatherml.data.remote.dto.GeoapifyReverseGeocodeResponseDto
-import com.artemzarubin.weatherml.data.remote.dto.GeocodingResponseItemDto
 import retrofit2.http.GET
 import retrofit2.http.Query
 
+@Suppress("KDocUnresolvedReference")
 interface ApiService {
 
     /**
@@ -52,22 +54,6 @@ interface ApiService {
         @Query("lang") language: String = "en",
         @Query("cnt") count: Int? = null // Optional: number of timestamps to return (max 40)
     ): ForecastResponseDto
-
-    /**
-     * Fetches geographic coordinates for a given location name.
-     * Uses the OpenWeatherMap Geocoding API.
-     *
-     * @param cityName The name of the city (and optionally state code, country code).
-     * @param limit The maximum number of locations in the API response (default 1, max 5).
-     * @param apiKey Your unique API key.
-     * @return A list of [GeocodingResponseItemDto] containing location data.
-     */
-    @GET("https://api.openweathermap.org/geo/1.0/direct") // FULL URL instead of /geo/...
-    suspend fun getCoordinatesByCityName(
-        @Query("q") cityName: String,
-        @Query("limit") limit: Int = 5, // Request up to 5
-        @Query("appid") apiKey: String
-    ): List<GeocodingResponseItemDto> // API returns a JSON array
 
     /**
      * Fetches place autocomplete suggestions from Geoapify API.

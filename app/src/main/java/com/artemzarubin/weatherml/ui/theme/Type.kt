@@ -9,23 +9,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.artemzarubin.weatherml.R // Import your app's R class to access resources
 
-// Example for "minecraft.ttf" - assuming it's a normal weight font
-val MinecraftFontFamily = FontFamily(
-    Font(R.font.minecraft, FontWeight.Normal)
-)
-
-// Example for "rainyhearts.ttf"
-val RainyHeartsFontFamily = FontFamily(
-    Font(R.font.rainyhearts, FontWeight.Normal)
-)
-
-// Example for one of the "slkscr" fonts (e.g., slkscr.ttf)
-val SlkscrFontFamily = FontFamily(
-    Font(R.font.slkscr, FontWeight.Normal)
-    // If having bold/italic versions for slkscr, can add them:
-    // Font(R.font.slkscrb, FontWeight.Bold) // Assuming slkscrb.ttf is the bold version
-)
-
 // Example for one of the "vcr_osd_mono" fonts (e.g., slkscr.ttf)
 val VCROSDFontFamily = FontFamily(
     Font(R.font.vcr_osd_mono, FontWeight.Normal)

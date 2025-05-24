@@ -71,7 +71,7 @@ class NetworkConnectivityObserverImpl @Inject constructor(
     }
 
     // Метод для одноразової перевірки доступності мережі
-    @Suppress("DEPRECATION") // Для старіших версій Android
+    // Для старіших версій Android
     override fun isNetworkAvailable(): Boolean {
         val activeNetwork = connectivityManager.activeNetwork ?: return false
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false

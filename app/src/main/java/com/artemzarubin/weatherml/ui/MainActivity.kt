@@ -28,7 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +43,8 @@ import com.artemzarubin.weatherml.domain.model.DailyForecast
 import com.artemzarubin.weatherml.domain.model.HourlyForecast
 import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
 import com.artemzarubin.weatherml.ui.theme.WeatherMLTheme
+import com.artemzarubin.weatherml.ui.util.IconSizeQualifier
+import com.artemzarubin.weatherml.ui.util.WeatherIconMapper
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
@@ -193,8 +194,8 @@ fun CurrentWeatherMainSection(
         )*/
         // Spacer(modifier = Modifier.height(1.dp))
         val largeIconResId = getWeatherIconResourceId(
-            iconId = currentWeather.weatherIconId,
-            iconPrefix = "icon_512_"
+            iconCode = currentWeather.weatherIconId,
+            size = IconSizeQualifier.SIZE_512
         )
         Image(
             painter = painterResource(id = largeIconResId),
@@ -321,8 +322,8 @@ fun SimpleHourlyForecastItemView(
         Spacer(modifier = Modifier.height(4.dp))
         val hourlyIconResId =
             getWeatherIconResourceId(
-                iconId = hourlyForecast.weatherIconId,
-                iconPrefix = "icon_128_"
+                iconCode = hourlyForecast.weatherIconId,
+                size = IconSizeQualifier.SIZE_128
             )
         Image(
             painter = painterResource(id = hourlyIconResId),
@@ -388,8 +389,8 @@ fun SimplifiedDailyForecastItemView(
             contentAlignment = Alignment.Center
         ) {
             val dailyIconResId = getWeatherIconResourceId(
-                iconId = dailyForecast.weatherIconId,
-                iconPrefix = "icon_128_"
+                iconCode = dailyForecast.weatherIconId,
+                size = IconSizeQualifier.SIZE_128
             )
             Image(
                 painter = painterResource(id = dailyIconResId),
@@ -473,35 +474,17 @@ fun degreesToCardinalDirection(degrees: Int): String {
     return directions[(degrees / 22.5).toInt() % 16]
 }
 
-fun getAqiInterpretation(aqiValue: Float?): String {
-    if (aqiValue == null) return "N/A"
-    // Round to nearest integer for category mapping, or use ranges
-    val roundedAqi = Math.round(aqiValue)
-    return when (roundedAqi) {
-        1 -> "Good"
-        2 -> "Moderate"
-        3 -> "Unhealthy for Sensitive" // Groups
-        4 -> "Unhealthy"
-        5 -> "Very Unhealthy"
-        6 -> "Hazardous"
-        else -> { // Handle values outside 1-6, though model should output within this if trained on it
-            if (aqiValue < 1) "Good"
-            else if (aqiValue > 6) "Hazardous"
-            else "Unknown"
-        }
-    }
-}
-
+/**
+ * Composable function to get the weather icon resource ID.
+ * Delegates to WeatherIconMapper for the actual mapping.
+ *
+ * @param iconCode The icon code from the API (e.g., "01d").
+ * @param size The desired icon size, represented by [IconSizeQualifier].
+ * @return The drawable resource ID.
+ */
 @Composable
-fun getWeatherIconResourceId(iconId: String?, iconPrefix: String = "icon_"): Int {
-    if (iconId.isNullOrBlank()) {
-        return R.drawable.ic_weather_placeholder
-    }
-    val context = LocalContext.current
-    val resourceName = iconPrefix + iconId.lowercase()
-    val resourceId =
-        context.resources.getIdentifier(resourceName, "drawable", context.packageName)
-    return if (resourceId != 0) resourceId else R.drawable.ic_weather_placeholder
+fun getWeatherIconResourceId(iconCode: String?, size: IconSizeQualifier): Int {
+    return WeatherIconMapper.getResourceId(iconCode, size)
 }
 
 @Preview(showBackground = true)
