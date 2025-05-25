@@ -1,6 +1,27 @@
 # Pixel Weather App (Diploma Project)
 
 <p align="center">
+  <!-- Build & Quality -->
+  <img src="https://img.shields.io/github/actions/workflow/status/ArtemZarubin/PixelArtWeatherML/android.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="Android CI Build Status"/>
+  <img src="https://img.shields.io/github/license/ArtemZarubin/PixelArtWeatherML?style=for-the-badge" alt="License" />
+  <br/>
+  <!-- Tech Stack -->
+  <img src="https://img.shields.io/badge/Kotlin-2.1.21-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin Version"/>
+  <img src="https://img.shields.io/badge/Jetpack%20Compose-BOM%2025.05.01-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
+  <img src="https://img.shields.io/badge/Android%20API-26+-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="API Level" />
+  <img src="https://img.shields.io/badge/Architecture-MVVM%20%7C%20Clean-007ACC?style=for-the-badge" alt="Architecture" />
+  <br/>
+  <!-- Repository Stats -->
+  <img src="https://img.shields.io/github/last-commit/ArtemZarubin/PixelArtWeatherML?style=for-the-badge&logo=git&logoColor=white" alt="Last Commit" />
+  <img src="https://img.shields.io/github/stars/ArtemZarubin/PixelArtWeatherML?style=for-the-badge&logo=github&logoColor=white" alt="Stars" />
+  <img src="https://img.shields.io/github/forks/ArtemZarubin/PixelArtWeatherML?style=for-the-badge&logo=github&logoColor=white" alt="Forks" />
+  <img src="https://img.shields.io/github/issues-raw/ArtemZarubin/PixelArtWeatherML?style=for-the-badge&logo=github&logoColor=white" alt="Open Issues" /> 
+  <!-- <img src="https://img.shields.io/github/watchers/ArtemZarubin/PixelArtWeatherML?style=for-the-badge&logo=github&logoColor=white" alt="Watchers" /> -->
+  <!-- <img src="https://img.shields.io/github/languages/top/ArtemZarubin/PixelArtWeatherML?style=for-the-badge" alt="Top Language" /> -->
+  <!-- <img src="https://img.shields.io/github/languages/count/ArtemZarubin/PixelArtWeatherML?style=for-the-badge" alt="Languages Count" /> -->
+</p>
+
+<p align="center">
   <img src="app/src/main/ic_launcher-playstore.png" width="240" alt="App Icon"/><br/>
   <i>App Icon</i>
 </p>
@@ -73,9 +94,9 @@ to provide "Feels Like" temperature predictions.
 
 ### Prerequisites
 
-* Android Studio (latest stable version recommended, e.g., Hedgehog or newer)
+* Android Studio (latest stable version recommended, e.g., Meerkat or newer)
 * Android SDK (API Level 26 or higher)
-* JDK 17 or higher
+* JDK 21 or higher (project is compiled with Java 21 features)
 
 ### Installation & Setup
 
@@ -125,9 +146,7 @@ Celsius.
 
 The complete model training process, including data loading, preprocessing, feature engineering,
 model definition, training, and evaluation, can be found in the following Google Colab notebook:
-➡️ *
-*[View Model Training Notebook on Google Colab](https://colab.research.google.com/drive/1azhbcOYesQdHLMwZ1gLaPV3ceyr5QpX9?usp=sharing)
-**
+➡️ **[View Model Training Notebook on Google Colab](https://colab.research.google.com/drive/1azhbcOYesQdHLMwZ1gLaPV3ceyr5QpX9?usp=sharing)**
 
 ## 📄 License
 
@@ -137,8 +156,7 @@ This project is licensed under the **MIT License**. See the `LICENSE` file for d
 
 * **OpenWeatherMap** for providing the weather data API.
 * **Geoapify** for the geocoding and autocomplete APIs.
-* **Dataset:
-  ** ["Historical Weather Data for different cities around the world" from Kaggle](https://www.kaggle.com/datasets/muthuj7/weather-dataset).
+* **Dataset:** ["Historical Weather Data for different cities around the world" from Kaggle](https://www.kaggle.com/datasets/muthuj7/weather-dataset).
 * **Pixel Fonts:** VCR OSD Mono by Riciery Leal.
 * **Icons:**
     * Weather Icons: Freepik - Flaticon
