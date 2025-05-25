@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,14 +28,19 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,6 +58,7 @@ import com.artemzarubin.weatherml.domain.model.SavedLocation
 import com.artemzarubin.weatherml.ui.mainscreen.MainViewModel
 import com.artemzarubin.weatherml.ui.mainscreen.PagerItem
 import com.artemzarubin.weatherml.util.Resource
+import kotlinx.coroutines.flow.collectLatest
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,17 +68,37 @@ fun ManageCitiesScreen(
 ) {
     val pagerItemsList by viewModel.pagerItems.collectAsState()
     val savedLocationPages = pagerItemsList.filterIsInstance<PagerItem.SavedPage>()
-    val currentActivePagerItem by viewModel.currentActivePagerItem.collectAsState()
+    // val currentActivePagerItem by viewModel.currentActivePagerItem.collectAsState() // Не используется здесь напрямую
     val autocompleteResultsState by viewModel.autocompleteResults.collectAsState()
     var searchQuery by rememberSaveable { mutableStateOf("") }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val canAddLocation by viewModel.canAddNewLocation.collectAsState()
 
+    // --- ИЗМЕНЕНИЯ ДЛЯ SNACKBAR В MATERIAL 3 ---
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(key1 = Unit) { // Запускаем один раз
+        viewModel.userMessages.collectLatest { message ->
+            snackbarHostState.showSnackbar(
+                message = message,
+                duration = SnackbarDuration.Short // SnackbarDuration из Material 2 все еще работает
+            )
+        }
+    }
+    // --- КОНЕЦ ИЗМЕНЕНИЙ ДЛЯ SNACKBAR ---
+
     Scaffold(
+        // scaffoldState = scaffoldState, // <-- УДАЛИТЬ ЭТУ СТРОКУ
+        snackbarHost = { SnackbarHost(snackbarHostState) }, // <-- ДОБАВИТЬ ЭТО ДЛЯ MATERIAL 3
         topBar = {
             TopAppBar(
-                title = { Text("Manage Locations", style = MaterialTheme.typography.labelLarge) },
+                title = {
+                    Text(
+                        "Manage Locations",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }, // Стиль можно поменять на headlineSmall или titleLarge
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Image(
@@ -108,7 +135,7 @@ fun ManageCitiesScreen(
                     else if (newText.isBlank()) viewModel.clearGeocodingResults()
                 },
                 label = { Text("Enter city name", style = MaterialTheme.typography.bodySmall) },
-                enabled = canAddLocation, // <--- ДЕАКТИВУЄМО ПОЛЕ
+                enabled = canAddLocation,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyLarge,
@@ -130,7 +157,7 @@ fun ManageCitiesScreen(
 
             // --- Autocomplete Results ---
             val currentAutocompleteState = autocompleteResultsState
-            if (searchQuery.length >= 3) {
+            if (searchQuery.length >= 3) { // Показываем результаты только если есть поисковый запрос
                 when (currentAutocompleteState) {
                     is Resource.Loading -> {
                         CircularProgressIndicator(
@@ -142,14 +169,14 @@ fun ManageCitiesScreen(
                     is Resource.Success -> {
                         val locations = currentAutocompleteState.data
                         if (!locations.isNullOrEmpty()) {
-                            LazyColumn {
+                            LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) { // Ограничиваем высоту списка результатов
                                 items(
                                     locations,
                                     key = { it.properties?.placeId ?: it.hashCode() }) { feature ->
                                     LocationSearchResultItem(feature = feature) {
                                         viewModel.onCitySuggestionSelected(feature)
-                                        searchQuery = ""
-                                        viewModel.clearGeocodingResults()
+                                        searchQuery = "" // Очищаем поле поиска
+                                        viewModel.clearGeocodingResults() // Очищаем результаты
                                         keyboardController?.hide(); focusManager.clearFocus()
                                     }
                                     if (locations.last() != feature) HorizontalDivider(
@@ -159,7 +186,7 @@ fun ManageCitiesScreen(
                                     )
                                 }
                             }
-                        } else if (currentAutocompleteState.data != null) { // Порожній успішний результат
+                        } else if (searchQuery.isNotBlank() && currentAutocompleteState.data != null) { // Если запрос не пуст и результат пуст
                             Text(
                                 "No cities found for \"$searchQuery\"",
                                 style = MaterialTheme.typography.bodySmall,
@@ -169,7 +196,7 @@ fun ManageCitiesScreen(
                     }
                     is Resource.Error -> {
                         currentAutocompleteState.message?.let {
-                            if (it != "City name cannot be empty.") { // Не показуємо цю специфічну помилку тут
+                            if (it != "City name cannot be empty.") {
                                 Text(
                                     "Search Error: $it",
                                     color = MaterialTheme.colorScheme.error,
@@ -192,10 +219,10 @@ fun ManageCitiesScreen(
                 LazyColumn(modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)) {
-                    itemsIndexed( // Використовуємо itemsIndexed, щоб мати доступ до індексу
+                    itemsIndexed(
                         items = savedLocationPages,
-                        key = { _, savedPageItem -> savedPageItem.id } // Ключ тепер приймає (index, item)
-                    ) { index, savedPageItem -> // Тепер index та savedPageItem доступні
+                        key = { _, savedPageItem -> savedPageItem.id }
+                    ) { index, savedPageItem ->
                         SavedLocationRow(
                             location = savedPageItem.location,
                             onMoveUp = {
@@ -222,11 +249,9 @@ fun ManageCitiesScreen(
                             canMoveUp = (index > 0),
                             canMoveDown = (index < savedLocationPages.size - 1)
                         )
-                        // --- УМОВА ДЛЯ РОЗДІЛЬНИКА ---
-                        if (index < savedLocationPages.size - 1) { // Показуємо роздільник, тільки якщо це НЕ останній елемент
+                        if (index < savedLocationPages.size - 1) {
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
                         }
-                        // --- КІНЕЦЬ УМОВИ ---
                     }
                 }
             }

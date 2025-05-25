@@ -112,8 +112,11 @@ object NetworkModule {
         application: Application,
         fusedLocationProviderClient: FusedLocationProviderClient
     ): LocationTracker {
-        // Hilt will provide Application and FusedLocationProviderClient
-        return LocationTrackerImpl(application, fusedLocationProviderClient)
+
+        return LocationTrackerImpl(
+            locationClient = fusedLocationProviderClient,
+            application = application
+        )
     }
 
     @Provides
@@ -136,7 +139,7 @@ object NetworkModule {
 
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class ConnectivityModule { // Назва може бути іншою, наприклад, AppModule, якщо він вже є
+abstract class ConnectivityModule {
 
     @Binds
     @Singleton

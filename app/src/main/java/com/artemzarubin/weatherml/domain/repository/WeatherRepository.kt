@@ -1,4 +1,4 @@
-@file:Suppress("KDocUnresolvedReference", "KDocUnresolvedReference", "KDocUnresolvedReference")
+@file:Suppress("KDocUnresolvedReference", "KDocUnresolvedReference")
 
 package com.artemzarubin.weatherml.domain.repository
 

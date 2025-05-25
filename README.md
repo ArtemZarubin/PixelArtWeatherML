@@ -84,9 +84,9 @@ to provide "Feels Like" temperature predictions.
     <th>Settings Screen</th>
   </tr>
   <tr>
-    <td><img src="screenshots/main_screen.jpg" width="350"/></td>
-    <td><img src="screenshots/manage_locations.jpg" width="350"/></td>
-    <td><img src="screenshots/settings_screen.jpg" width="350"/></td>
+    <td><img src="screenshots/main_screen.jpg" width="350" alt="Main Screen"/></td>
+    <td><img src="screenshots/manage_locations.jpg" width="350" alt="Manage Locations"/></td>
+    <td><img src="screenshots/settings_screen.jpg" width="350" alt="Settings Screen"/></td>
   </tr>
 </table>
 

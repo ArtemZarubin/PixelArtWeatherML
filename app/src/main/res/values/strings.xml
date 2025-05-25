@@ -1,3 +1,8 @@
 <resources>
     <string name="app_name">Pixel Weather</string>
+
+    <string name="gps_disabled_title">GPS is Disabled</string>
+    <string name="gps_disabled_message">Please enable location services to get weather for your current location.</string>
+    <string name="open_location_settings">Open Location Settings</string>
+
 </resources>

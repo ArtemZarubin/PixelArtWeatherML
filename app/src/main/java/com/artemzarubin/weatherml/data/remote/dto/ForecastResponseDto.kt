@@ -58,7 +58,7 @@ data class ForecastSysDto( // System information within a forecast item
 data class CityDto(
     @SerialName("id") val id: Int?,
     @SerialName("name") val name: String?,
-    @SerialName("coord") val coordinates: CoordinatesDto?, // <--- МАЄ БУТИ NULLABLE
+    @SerialName("coord") val coordinates: CoordinatesDto? = null, // <--- МАЄ БУТИ NULLABLE
     @SerialName("country") val country: String?,
     @SerialName("population") val population: Int?,
     @SerialName("timezone") val timezone: Int?,

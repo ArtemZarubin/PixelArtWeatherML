@@ -3,7 +3,6 @@ package com.artemzarubin.weatherml.ui.mainscreen
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
-import android.location.Location
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
@@ -26,6 +25,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
@@ -88,6 +88,9 @@ open class MainViewModel @Inject constructor(
     companion object {
         const val MAX_SAVED_LOCATIONS = 10 // Максимальна кількість ЗБЕРЕЖЕНИХ локацій
     }
+
+    private val _userMessages = MutableSharedFlow<String>() // Для общих сообщений пользователю
+    val userMessages = _userMessages.asSharedFlow()
 
     private val _weatherDataStateMap =
         MutableStateFlow<Map<String, Resource<WeatherDataBundle>>>(emptyMap())
@@ -365,22 +368,58 @@ open class MainViewModel @Inject constructor(
         currentActivePagerItem
             .filterNotNull()
             .distinctUntilChanged { old, new ->
+                // Существующая логика distinctUntilChanged
                 val oldGeoLoading = (old as? PagerItem.GeolocationPage)?.isLoadingDetails
                 val newGeoLoading = (new as? PagerItem.GeolocationPage)?.isLoadingDetails
-                (old.id == new.id && oldGeoLoading == newGeoLoading)
+                // Добавим проверку на изменение координат, если это геолокационная страница,
+                // чтобы перезагрузить погоду, если координаты обновились, даже если isLoadingDetails не менялся.
+                val coordinatesChanged =
+                    if (old is PagerItem.GeolocationPage && new is PagerItem.GeolocationPage) {
+                        old.latitude != new.latitude || old.longitude != new.longitude
+                    } else false
+                (old.id == new.id && oldGeoLoading == newGeoLoading && !coordinatesChanged)
             }
             .onEach { pagerItem ->
                 Log.i(
                     "MainViewModel_Observer",
-                    "Current Pager Item to fetch for: ${pagerItem.displayName} (ID: ${pagerItem.id}), isLoadingDetails: ${(pagerItem as? PagerItem.GeolocationPage)?.isLoadingDetails}"
+                    "Current Pager Item to evaluate for fetch: ${pagerItem.displayName} (ID: ${pagerItem.id}), isLoadingDetails: ${(pagerItem as? PagerItem.GeolocationPage)?.isLoadingDetails}, Lat: ${pagerItem.latitude}, Lon: ${pagerItem.longitude}"
                 )
-                if (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails) {
-                    Log.d(
-                        "MainViewModel_Observer",
-                        "Geolocation page details are still loading (${pagerItem.fetchedCityName}). Weather fetch will wait."
-                    )
-                    return@onEach
+
+                if (pagerItem is PagerItem.GeolocationPage) {
+                    if (pagerItem.isLoadingDetails) {
+                        Log.d(
+                            "MainViewModel_Observer",
+                            "Geolocation page details are still loading (${pagerItem.fetchedCityName}). Weather fetch will wait."
+                        )
+                        return@onEach
+                    }
+                    // --- НОВАЯ ПРОВЕРКА ---
+                    // Не запускать загрузку погоды для геолокации, если текущее состояние - ошибка "GPS is disabled"
+                    val currentGeoState = _weatherDataStateMap.value[pagerItem.id]
+                    if (currentGeoState is Resource.Error && currentGeoState.message?.contains(
+                            "GPS is disabled",
+                            ignoreCase = true
+                        ) == true
+                    ) {
+                        Log.w(
+                            "MainViewModel_Observer",
+                            "Skipping weather fetch for GeolocationPage because GPS is currently reported as disabled. State: $currentGeoState"
+                        )
+                        return@onEach
+                    }
+                    // --- КОНЕЦ НОВОЙ ПРОВЕРКИ ---
                 }
+
+                // Проверяем, нужно ли вообще загружать погоду (например, если она уже есть и успешна)
+                // Это можно оптимизировать, но для начала оставим как есть, чтобы не сломать другую логику.
+                // Важно, чтобы fetchWeatherDataForPagerItem вызывался, если данных нет или они не Resource.Success.
+                val weatherState = _weatherDataStateMap.value[pagerItem.id]
+                if (weatherState is Resource.Success && pagerItem !is PagerItem.GeolocationPage) { // Для сохраненных можно не перезагружать, если уже есть
+                    // Однако, если это геолокация и координаты могли обновиться, то стоит перезагрузить.
+                    // Эта логика может быть сложной, пока оставим так.
+                }
+
+
                 Log.d(
                     "MainViewModel_Observer",
                     "Proceeding to fetchWeatherDataForPagerItem for ${pagerItem.displayName}"
@@ -427,169 +466,122 @@ open class MainViewModel @Inject constructor(
     }
 
     private fun fetchDetailsForGeolocationPage() {
-        if (!hasLocationPermission()) {
-            Log.w(
-                "MainViewModel",
-                "fetchDetailsForGeolocationPage: Called without location permission!"
-            )
-            setPermissionError("Location permission needed for geolocation.")
-            _geolocationPagerItemState.update {
-                it.copy(
-                    isLoadingDetails = false,
-                    fetchedCityName = "Permission Denied"
-                )
-            }
-            return
-        }
-
         val geoPageId = PagerItem.GeolocationPage().id
-        if (fetchWeatherJobs[geoPageId]?.isActive == true) {
-            Log.d(
-                "MainViewModel",
-                "fetchDetailsForGeolocationPage: Job for $geoPageId is already active. isLoadingDetails: ${_geolocationPagerItemState.value.isLoadingDetails}"
-            )
-            return
-        }
-        if (!_geolocationPagerItemState.value.isLoadingDetails && _geolocationPagerItemState.value.fetchedCityName != "My Location" && _geolocationPagerItemState.value.fetchedCityName != "Loading location...") {
-            Log.d(
-                "MainViewModel",
-                "fetchDetailsForGeolocationPage: Details already loaded for ${_geolocationPagerItemState.value.fetchedCityName}. isLoadingDetails: false. Triggering weather fetch if current."
-            )
-            if (currentActivePagerItem.value?.id == geoPageId && _weatherDataStateMap.value[geoPageId] !is Resource.Success) {
-                fetchWeatherDataForPagerItem(_geolocationPagerItemState.value)
-            }
-            return
-        }
+        // Отменяем предыдущую активную работу, если она есть, чтобы избежать гонок состояний
+        fetchWeatherJobs[geoPageId]?.cancel() // Отмена предыдущего Job для этого ID
 
         fetchWeatherJobs[geoPageId] = viewModelScope.launch {
-            Log.d(
-                "MainViewModel",
-                "fetchDetailsForGeolocationPage: COROUTINE STARTED for $geoPageId."
-            )
-            if (!_geolocationPagerItemState.value.isLoadingDetails || _geolocationPagerItemState.value.fetchedCityName == "My Location") {
+            // Убедимся, что PagerItem обновлен и isLoadingDetails = true
+            if (!_geolocationPagerItemState.value.isLoadingDetails) {
                 _geolocationPagerItemState.update {
-                    Log.d(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Updating geoPagerItemState to LOADING DETAILS."
-                    )
-                    PagerItem.GeolocationPage(
+                    it.copy(
                         isLoadingDetails = true,
                         fetchedCityName = "Loading location..."
                     )
                 }
             }
+            // Устанавливаем состояние загрузки в карте состояний
+            _weatherDataStateMap.update { currentMap ->
+                currentMap.toMutableMap().apply {
+                    this[geoPageId] =
+                        Resource.Loading(message = "Fetching geolocation details...")
+                }.toMap()
+            }
 
-            try {
-                Log.d(
-                    "MainViewModel",
-                    "fetchDetailsForGeolocationPage: Attempting to get current location from locationTracker..."
-                )
-                val locationData: Location? =
-                    locationTracker.getCurrentLocation()
-
-                if (locationData != null) {
-                    Log.i(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Got locationData: Lat=${locationData.latitude}, Lon=${locationData.longitude}"
-                    )
-                    Log.d(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Attempting to get location details from repository..."
-                    )
-                    val details = weatherRepository.getLocationDetailsByCoordinates(
-                        locationData.latitude, locationData.longitude, BuildConfig.GEOAPIFY_API_KEY
-                    )
-                    Log.d(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Got details from repository: $details"
-                    )
-
-                    var city = "Current Location"
-                    var country: String? = null
-                    if (details is Resource.Success && details.data?.properties != null) {
-                        city =
-                            details.data.properties.city ?: details.data.properties.formattedAddress
-                                    ?: city
-                        country = details.data.properties.countryCode?.uppercase()
-                        Log.i(
-                            "MainViewModel",
-                            "fetchDetailsForGeolocationPage: Reverse geocoded to $city, $country"
-                        )
-                    } else if (details is Resource.Error) {
-                        Log.w(
-                            "MainViewModel",
-                            "fetchDetailsForGeolocationPage: Failed to get location details: ${details.message}"
-                        )
-                        city = "Details Error"
+            locationTracker.getCurrentLocation().collectLatest { locationResource ->
+                // val geoPageId = PagerItem.GeolocationPage().id // Уже определен выше
+                when (locationResource) {
+                    is Resource.Success -> {
+                        val locationData = locationResource.data
+                        if (locationData != null) {
+                            Log.i(
+                                "MainViewModel",
+                                "Geo Details: Got locationData: Lat=${locationData.latitude}, Lon=${locationData.longitude}"
+                            )
+                            val details = weatherRepository.getLocationDetailsByCoordinates(
+                                locationData.latitude,
+                                locationData.longitude,
+                                BuildConfig.GEOAPIFY_API_KEY
+                            )
+                            var city = "Current Location"
+                            var country: String? = null
+                            if (details is Resource.Success && details.data?.properties != null) {
+                                city = details.data.properties.city
+                                    ?: details.data.properties.formattedAddress ?: city
+                                country = details.data.properties.countryCode?.uppercase()
+                            } else if (details is Resource.Error) {
+                                city = "Details Error"
+                            }
+                            _geolocationPagerItemState.update {
+                                it.copy(
+                                    lat = locationData.latitude,
+                                    lon = locationData.longitude,
+                                    fetchedCityName = city,
+                                    fetchedCountryCode = country,
+                                    isLoadingDetails = false // <--- ВАЖНО: сбросить после получения деталей
+                                )
+                            }
+                            // После обновления _geolocationPagerItemState, observeActivePagerItemToFetchWeather
+                            // должен среагировать и вызвать fetchWeatherDataForPagerItem, если это активная страница.
+                            // Если _weatherDataStateMap[geoPageId] все еще Loading, то fetchWeatherDataForPagerItem перезапишет его.
+                        } else {
+                            _geolocationPagerItemState.update {
+                                it.copy(
+                                    isLoadingDetails = false,
+                                    fetchedCityName = "Location Unknown"
+                                )
+                            }
+                            _weatherDataStateMap.update { currentMap ->
+                                currentMap.toMutableMap().apply {
+                                    this[geoPageId] =
+                                        Resource.Error("Could not get current geolocation (null data).")
+                                }.toMap()
+                            }
+                        }
                     }
 
-                    _geolocationPagerItemState.update {
-                        Log.i(
-                            "MainViewModel",
-                            "fetchDetailsForGeolocationPage: Updating geoPagerItemState with SUCCESSFUL details. City: $city, isLoadingDetails: false"
-                        )
-                        PagerItem.GeolocationPage(
-                            lat = locationData.latitude,
-                            lon = locationData.longitude,
-                            fetchedCityName = city,
-                            fetchedCountryCode = country,
-                            isLoadingDetails = false
-                        )
+                    is Resource.Error -> {
+                        val errorMessage = locationResource.message ?: "Failed to get location."
+                        Log.w("MainViewModel", "Error from locationTracker: $errorMessage")
+                        _geolocationPagerItemState.update {
+                            it.copy(
+                                isLoadingDetails = false,
+                                fetchedCityName = if (errorMessage.contains(
+                                        "GPS is disabled",
+                                        ignoreCase = true
+                                    )
+                                ) "GPS Disabled" else "Location Error",
+                                // Важно не сбрасывать lat/lon, если они уже были, но здесь это не тот случай
+                                lat = 0.0, // Сбрасываем, так как геолокация не удалась
+                                lon = 0.0
+                            )
+                        }
+                        _weatherDataStateMap.update { currentMap ->
+                            currentMap.toMutableMap().apply {
+                                this[geoPageId] = Resource.Error(message = errorMessage)
+                            }.toMap()
+                        }
                     }
-                } else {
-                    Log.w("MainViewModel", "fetchDetailsForGeolocationPage: locationData is NULL.")
-                    _geolocationPagerItemState.update {
-                        Log.w(
-                            "MainViewModel",
-                            "fetchDetailsForGeolocationPage: Updating geoPagerItemState with LOCATION UNKNOWN. isLoadingDetails: false"
-                        )
-                        it.copy(
-                            isLoadingDetails = false,
-                            fetchedCityName = "Location Unknown"
-                        )
-                    }
-                    _weatherDataStateMap.update { currentMap ->
-                        Log.w(
-                            "MainViewModel",
-                            "fetchDetailsForGeolocationPage: Setting weatherDataStateMap to ERROR for $geoPageId due to null locationData."
-                        )
-                        currentMap.toMutableMap().apply {
-                            this[geoPageId] =
-                                Resource.Error("Could not get current geolocation (null from tracker).")
-                        }.toMap()
+
+                    is Resource.Loading -> {
+                        Log.d("MainViewModel", "Geo Details: LocationTracker is Loading...")
+                        _geolocationPagerItemState.update {
+                            it.copy(
+                                isLoadingDetails = true, // Убедимся, что флаг установлен
+                                fetchedCityName = locationResource.message ?: "Fetching location..."
+                            )
+                        }
+                        // Также обновим _weatherDataStateMap, чтобы UI показывал сообщение от LocationTracker
+                        _weatherDataStateMap.update { currentMap ->
+                            currentMap.toMutableMap().apply {
+                                this[geoPageId] = Resource.Loading(
+                                    message = locationResource.message
+                                        ?: "Fetching location details..."
+                                )
+                            }.toMap()
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                Log.e(
-                    "MainViewModel",
-                    "fetchDetailsForGeolocationPage: CRITICAL ERROR in coroutine",
-                    e
-                )
-                _geolocationPagerItemState.update {
-                    Log.e(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Updating geoPagerItemState with LOCATION ERROR due to exception. isLoadingDetails: false"
-                    )
-                    it.copy(
-                        isLoadingDetails = false,
-                        fetchedCityName = "Location Error"
-                    )
-                }
-                _weatherDataStateMap.update { currentMap ->
-                    Log.e(
-                        "MainViewModel",
-                        "fetchDetailsForGeolocationPage: Setting weatherDataStateMap to ERROR for $geoPageId due to exception."
-                    )
-                    currentMap.toMutableMap().apply {
-                        this[geoPageId] =
-                            Resource.Error("Error fetching geolocation details: ${e.message}")
-                    }.toMap()
-                }
-            } finally {
-                Log.d(
-                    "MainViewModel",
-                    "fetchDetailsForGeolocationPage: COROUTINE FINISHED for $geoPageId."
-                )
             }
         }
     }
@@ -707,67 +699,87 @@ open class MainViewModel @Inject constructor(
         val lon = properties?.longitude
         val cityName = properties?.city ?: properties?.formattedAddress ?: "Unknown Location"
 
-        // Перевіряємо ліміт, використовуючи поточне значення з StateFlow, який вже є
-        // Або, якщо canAddNewLocation вже є, можна було б перевіряти його,
-        // але для негайної реакції в цій функції краще взяти актуальний розмір.
-        // Для цього нам потрібен StateFlow, який містить List<SavedLocation>.
-        // _savedLocationsFromDbFlow - це Flow, але ми можемо створити з нього StateFlow для цього.
-        // Або, простіше, використовувати кількість PagerItem.SavedPage з pagerItems.
-
         val currentSavedPagesCount = pagerItems.value.filterIsInstance<PagerItem.SavedPage>().size
         if (currentSavedPagesCount >= MAX_SAVED_LOCATIONS) {
             Log.w(
                 "MainViewModel",
-                "Cannot add new location. Limit of $MAX_SAVED_LOCATIONS saved locations reached. Current count: $currentSavedPagesCount"
+                "Cannot add new location. Limit of $MAX_SAVED_LOCATIONS saved locations reached."
             )
-            // TODO: Встановити StateFlow для показу повідомлення користувачеві в UI (наприклад, SnackBar)
-            // _showLimitReachedMessage.value = true (потім скинути)
+            viewModelScope.launch {
+                _userMessages.emit("You have reached the maximum number of saved locations (${MAX_SAVED_LOCATIONS}).")
+            }
             return
         }
 
         if (lat != null && lon != null) {
             viewModelScope.launch {
-                // Отримуємо поточний розмір списку збережених з БД для orderIndex
-                val currentSavedInDb =
-                    _savedLocationsFromDbFlow.first() // Отримуємо останній список з БД
+                val currentSavedInDb = _savedLocationsFromDbFlow.first()
 
                 val newSavedLocation = SavedLocation(
                     cityName = cityName.trim(),
                     countryCode = properties.countryCode?.uppercase(),
                     latitude = lat,
                     longitude = lon,
-                    isCurrentActive = false, // Нова локація стає активною через setActiveLocation
-                    orderIndex = currentSavedInDb.size // Новий порядок
+                    isCurrentActive = false,
+                    orderIndex = currentSavedInDb.size
                 )
                 val newId = weatherRepository.addSavedLocation(newSavedLocation)
-                if (newId > 0L) {
+
+                if (newId > 0L) { // Успешно добавлено новое местоположение
                     weatherRepository.setActiveLocation(newId.toInt())
-                    // Чекаємо, поки pagerItems оновиться, щоб включити нову локацію
                     val targetPageId = "saved_$newId"
                     try {
+                        // Ожидаем обновления pagerItems и затем устанавливаем индекс
                         pagerItems.first { items -> items.any { it.id == targetPageId } }
                         val newPageIndex = pagerItems.value.indexOfFirst { it.id == targetPageId }
                         if (newPageIndex != -1) {
                             _currentPagerIndex.value = newPageIndex
+                            Log.d(
+                                "MainViewModel",
+                                "Set current pager index to $newPageIndex for new city."
+                            )
                         }
+                        _userMessages.emit("${newSavedLocation.cityName} added and set as active.") // Сообщение об успешном добавлении
                     } catch (e: NoSuchElementException) {
                         Log.e(
                             "MainViewModel",
                             "New page $targetPageId not found in pagerItems after add."
                         )
                     }
-                } else if (newId == -2L) { // Вже існує
+                } else if (newId == -2L) { // Местоположение уже существует
                     val existing =
                         currentSavedInDb.find { it.latitude == lat && it.longitude == lon }
+                    val existingCityName = existing?.cityName
+                        ?: cityName // Используем имя из БД, если есть, или из DTO
+                    Log.w("MainViewModel", "$existingCityName already exists in saved locations.")
+                    _userMessages.emit("$existingCityName is already in your saved locations.") // Отправляем сообщение в UI
+
                     existing?.let {
+                        // Если город уже существует, делаем его активным и переключаемся на него
                         weatherRepository.setActiveLocation(it.id)
                         val existingPageIndex =
                             pagerItems.value.indexOfFirst { pgItem -> pgItem is PagerItem.SavedPage && pgItem.location.id == it.id }
                         if (existingPageIndex != -1) {
-                            _currentPagerIndex.value = existingPageIndex
+                            if (_currentPagerIndex.value != existingPageIndex) {
+                                _currentPagerIndex.value = existingPageIndex
+                                Log.d(
+                                    "MainViewModel",
+                                    "Set current pager index to $existingPageIndex for existing city."
+                                )
+                            } else {
+                                // Если уже на этой странице, можно просто обновить погоду (на всякий случай)
+                                fetchWeatherDataForPagerItem(pagerItems.value[existingPageIndex])
+                            }
                         }
                     }
+                } else { // Другая ошибка при добавлении
+                    Log.e("MainViewModel", "Failed to add location, repository returned: $newId")
+                    _userMessages.emit("Could not add ${cityName}. Please try again.")
                 }
+            }
+        } else {
+            viewModelScope.launch {
+                _userMessages.emit("Could not add location: Invalid coordinates.")
             }
         }
     }
@@ -855,66 +867,66 @@ open class MainViewModel @Inject constructor(
         Log.e("MainViewModel", "Permission error set for $errorKey: $message")
     }
 
-    fun handlePermissionGranted() {
-        Log.d("MainViewModel", "handlePermissionGranted called by UI.")
+    // Вызывается, когда разрешения есть И GPS включен (например, из ON_START или после запроса разрешений)
+    fun handlePermissionAndGpsGranted() {
+        Log.d("MainViewModel", "handlePermissionAndGpsGranted called.")
         val geoPageId = PagerItem.GeolocationPage().id
 
-        // Очистим предыдущую ошибку разрешений для geoPageId, если она была.
-        // Это позволит избежать показа старой ошибки, если разрешения были даны из настроек.
         _weatherDataStateMap.update { currentMap ->
             val mutableMap = currentMap.toMutableMap()
-            val currentResource = mutableMap[geoPageId]
-            if (currentResource is Resource.Error && currentResource.message?.contains(
-                    "permission",
-                    ignoreCase = true
-                ) == true
-            ) {
-                Log.d(
-                    "MainViewModel",
-                    "Clearing previous permission error for $geoPageId as permissions are now granted."
-                )
-                // Можно установить временное состояние загрузки или просто удалить,
-                // чтобы fetchDetailsForGeolocationPage установил свое актуальное состояние.
-                // Если просто удалить, то не будет промежуточного Loading(message="Permissions granted...")
-                mutableMap.remove(geoPageId)
-                // Либо, если хотите явный индикатор, но без специфичного сообщения "Permissions granted":
-                // mutableMap[geoPageId] = Resource.Loading()
-            }
+            // Всегда устанавливаем Loading, так как инициируем новую последовательность загрузки
+            Log.d("MainViewModel", "handlePermissionAndGpsGranted: Setting geoPageId to Loading.")
+            mutableMap[geoPageId] = Resource.Loading(message = "Fetching location details...")
             mutableMap.toMap()
         }
 
-        // Сбрасываем состояние геолокационной страницы в начальное состояние загрузки.
-        // Это важно, чтобы данные (координаты, название города) были запрошены заново.
         _geolocationPagerItemState.update {
             Log.d(
                 "MainViewModel",
-                "handlePermissionGranted: Updating _geolocationPagerItemState to initial loading state (isLoadingDetails=true)."
+                "Resetting _geolocationPagerItemState to initial loading state for handlePermissionAndGpsGranted."
             )
-            PagerItem.GeolocationPage( // Сброс в полностью начальное состояние
+            PagerItem.GeolocationPage(
                 isLoadingDetails = true,
-                fetchedCityName = "Loading location...", // Начальный текст загрузки
-                lat = 0.0,
+                fetchedCityName = "Loading location...", // Начальный текст
+                lat = 0.0, // Сбрасываем координаты
                 lon = 0.0,
                 fetchedCountryCode = null
             )
         }
-        Log.d(
-            "MainViewModel",
-            "Updated _geolocationPagerItemState to initial loading state due to permission grant."
-        )
 
-        // Триггер для обновления списка pagerItems, если геолокационная страница должна добавиться/удалиться
         viewModelScope.launch {
             Log.d(
                 "MainViewModel",
-                "Emitting to _permissionCheckTrigger from handlePermissionGranted"
+                "Emitting to _permissionCheckTrigger from handlePermissionAndGpsGranted"
             )
             _permissionCheckTrigger.tryEmit(Unit)
         }
+        fetchDetailsForGeolocationPage() // Этот метод должен использовать обновленный LocationTracker
+    }
 
-        // Запускаем процесс получения деталей геолокации (координат и названия города).
-        // Эта функция, в свою очередь, инициирует загрузку погоды, если это активная страница.
-        fetchDetailsForGeolocationPage()
+    // Новый метод, чтобы принудительно установить ошибку "GPS is disabled"
+    // Это нужно, если разрешения есть, но GPS выключен (например, при запуске или возврате из настроек)
+    fun forceGpsDisabledError() {
+        val geoPageId = PagerItem.GeolocationPage().id
+        val errorMessage = "GPS is disabled. Please enable location services."
+        Log.d("MainViewModel", "forceGpsDisabledError: Setting GPS disabled error for $geoPageId")
+
+        _weatherDataStateMap.update { currentMap ->
+            currentMap.toMutableMap().apply {
+                this[geoPageId] = Resource.Error(message = errorMessage)
+            }.toMap()
+        }
+        // Также обновить состояние PagerItem.GeolocationPage, если это необходимо для UI
+        _geolocationPagerItemState.update {
+            it.copy(
+                isLoadingDetails = false, // Загрузка деталей не идет, так как GPS выключен
+                fetchedCityName = "GPS Disabled" // Или другое соответствующее имя
+            )
+        }
+        // Триггер для обновления списка pagerItems, если геолокационная страница должна удалиться/обновиться
+        viewModelScope.launch {
+            _permissionCheckTrigger.tryEmit(Unit)
+        }
     }
 
     fun setCurrentPagerItemToSavedLocation(savedLocation: SavedLocation) {

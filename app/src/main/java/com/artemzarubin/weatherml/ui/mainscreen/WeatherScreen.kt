@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
@@ -65,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +91,7 @@ import com.artemzarubin.weatherml.ui.theme.DefaultPixelFontFamily
 import com.artemzarubin.weatherml.util.Resource
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.cancellation.CancellationException
+
 
 // Функцію виносимо на рівень файлу
 private fun hasLocationPermission(context: Context): Boolean {
@@ -137,13 +140,12 @@ fun PageIndicator(
 fun WeatherScreen(
     viewModel: MainViewModel = hiltViewModel(),
     onNavigateToManageCities: () -> Unit,
-    onNavigateToSettings: () -> Unit // <--- ДОДАНО НОВИЙ ПАРАМЕТР
+    onNavigateToSettings: () -> Unit
 ) {
     val pagerItemsList by viewModel.pagerItems.collectAsState()
     val currentPagerIndexFromVM by viewModel.currentPagerIndex.collectAsState()
-    val weatherDataMap by viewModel.weatherDataStateMap.collectAsState() // Збираємо всю мапу станів
-
-    val userPreferences by viewModel.userPreferencesFlow.collectAsState() // <--- ОТРИМУЄМО НАЛАШТУВАННЯ
+    val weatherDataMap by viewModel.weatherDataStateMap.collectAsState()
+    val userPreferences by viewModel.userPreferencesFlow.collectAsState()
 
     val pagerState = rememberPagerState(
         initialPage = currentPagerIndexFromVM.coerceIn(
@@ -154,10 +156,15 @@ fun WeatherScreen(
     )
 
     val programmaticScrollInProgress = remember { mutableStateOf(false) }
-
     val context = LocalContext.current
     var showPermissionRationale by rememberSaveable { mutableStateOf(false) }
     var permissionsRequestedThisSession by rememberSaveable { mutableStateOf(false) }
+
+    // --- НОВЫЕ СОСТОЯНИЯ ДЛЯ GPS ---
+    var showGpsDisabledErrorScreen by rememberSaveable { mutableStateOf(false) }
+    var isLoadingAfterGpsEnabled by rememberSaveable { mutableStateOf(false) }
+    // --- КОНЕЦ НОВЫХ СОСТОЯНИЙ ---
+
     val locationPermissions = arrayOf(
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.ACCESS_COARSE_LOCATION
@@ -170,64 +177,226 @@ fun WeatherScreen(
             val coarseLocationGranted =
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
 
-            permissionsRequestedThisSession =
-                true // Отмечаем, что попытка запроса была (успешная или нет)
+            permissionsRequestedThisSession = true
 
             if (fineLocationGranted || coarseLocationGranted) {
-                showPermissionRationale = false // Разрешения предоставлены, скрываем UI ошибки
-                viewModel.handlePermissionGranted()
+                showPermissionRationale = false
+                // Проверяем GPS сразу после предоставления разрешений
+                val locationManager =
+                    context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                val isGpsCurrentlyEnabled =
+                    locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+                if (isGpsCurrentlyEnabled) {
+                    showGpsDisabledErrorScreen = false
+                    isLoadingAfterGpsEnabled = true // Показать загрузку перед получением данных
+                    viewModel.handlePermissionAndGpsGranted() // Новый или обновленный метод в ViewModel
+                } else {
+                    // Разрешения есть, но GPS выключен
+                    showGpsDisabledErrorScreen = true
+                    isLoadingAfterGpsEnabled = false
+                    // ViewModel должен установить ошибку "GPS is disabled" в weatherDataMap
+                    viewModel.forceGpsDisabledError()
+                }
             } else {
-                // Разрешения не предоставлены
                 val activity = context as? ComponentActivity
-                // Проверяем, следует ли показывать объяснение (rationale) ПОСЛЕ ЭТОГО отказа.
-                // Если false, значит пользователь выбрал "Don't ask again" или политика запрещает.
                 val shouldShowRationaleAfterThisAttempt = locationPermissions.any { perm ->
                     activity?.shouldShowRequestPermissionRationale(perm) ?: false
                 }
-
-                // Отказ считается перманентным (с точки зрения возможности запроса через диалог),
-                // если систему НЕ просит показывать объяснение.
                 val isPermanentlyDeniedNow = !shouldShowRationaleAfterThisAttempt
-
                 Log.d(
                     "WeatherScreen",
                     "PermissionResult: Denied. ShouldShowRationaleAfter: $shouldShowRationaleAfterThisAttempt, IsPermanentlyDeniedNow: $isPermanentlyDeniedNow"
                 )
-
                 viewModel.setPermissionError(
                     if (isPermanentlyDeniedNow) "Location permission permanently denied. Please enable it in app settings."
                     else "Location permission denied. Click to try again."
                 )
-                showPermissionRationale = true // Показываем UI ошибки/рационале
+                showPermissionRationale = true
             }
         }
     )
 
     val lifecycleOwner = LocalLifecycleOwner.current
+    val geoPageId = remember { PagerItem.GeolocationPage().id } // Запоминаем ID для геолокации
 
-    DisposableEffect(lifecycleOwner) {
+    // --- НОВЫЙ/ОБНОВЛЕННЫЙ LaunchedEffect для управления isLoadingAfterGpsEnabled и showGpsDisabledErrorScreen ---
+    LaunchedEffect(
+        weatherDataMap,
+        geoPageId,
+        permissionsRequestedThisSession
+    ) { // Добавим permissionsRequestedThisSession для реакции
+        val geoState = weatherDataMap[geoPageId]
+        val currentPermissionsGranted = hasLocationPermission(context)
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val isGpsActuallyEnabled =
+            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+
+        if (isLoadingAfterGpsEnabled) {
+            // ... (логика для isLoadingAfterGpsEnabled остается)
+            when (geoState) {
+                is Resource.Success -> {
+                    Log.d(
+                        "WeatherScreen",
+                        "GeoState is Success. isLoadingAfterGpsEnabled: true -> false."
+                    )
+                    isLoadingAfterGpsEnabled = false
+                    showGpsDisabledErrorScreen = false
+                }
+
+                is Resource.Error -> {
+                    Log.d(
+                        "WeatherScreen",
+                        "GeoState is Error ('${geoState.message}'). isLoadingAfterGpsEnabled: true -> false."
+                    )
+                    isLoadingAfterGpsEnabled = false
+                    // Если ошибка "GPS disabled" и разрешения есть, показываем экран ошибки GPS
+                    if (geoState.message?.contains(
+                            "GPS is disabled",
+                            ignoreCase = true
+                        ) == true && currentPermissionsGranted
+                    ) {
+                        Log.d(
+                            "WeatherScreen",
+                            "Error is GPS Disabled with permissions. showGpsDisabledErrorScreen: false -> true."
+                        )
+                        showGpsDisabledErrorScreen = true
+                    } else {
+                        showGpsDisabledErrorScreen = false
+                    }
+                }
+
+                is Resource.Loading -> {
+                    Log.d(
+                        "WeatherScreen",
+                        "GeoState is still Loading. isLoadingAfterGpsEnabled remains true."
+                    )
+                }
+
+                null -> {
+                    Log.d(
+                        "WeatherScreen",
+                        "GeoState is null. isLoadingAfterGpsEnabled remains true if it was true."
+                    )
+                }
+            }
+        } else { // isLoadingAfterGpsEnabled == false
+            if (currentPermissionsGranted && !isGpsActuallyEnabled) {
+                // Если разрешения есть, но GPS ФАКТИЧЕСКИ выключен,
+                // и ViewModel еще не успел выставить ошибку "GPS is disabled" или она была перезаписана,
+                // принудительно показываем экран ошибки GPS.
+                if (!showGpsDisabledErrorScreen) {
+                    Log.w(
+                        "WeatherScreen",
+                        "Permissions granted, GPS OFF, but showGpsDisabledErrorScreen is false. Forcing true."
+                    )
+                    showGpsDisabledErrorScreen = true
+                    viewModel.forceGpsDisabledError() // Попросим ViewModel также установить ошибку
+                }
+                if (showPermissionRationale) showPermissionRationale = false
+            } else if (geoState is Resource.Error && geoState.message?.contains(
+                    "GPS is disabled",
+                    ignoreCase = true
+                ) == true && currentPermissionsGranted
+            ) {
+                // Если ViewModel явно сообщает об ошибке GPS
+                if (!showGpsDisabledErrorScreen) {
+                    Log.d(
+                        "WeatherScreen",
+                        "ViewModel reports GPS Disabled error. showGpsDisabledErrorScreen: false -> true."
+                    )
+                    showGpsDisabledErrorScreen = true
+                }
+                if (showPermissionRationale) showPermissionRationale = false
+            } else {
+                // Во всех остальных случаях, если showGpsDisabledErrorScreen был true, но условия больше не выполняются, скрываем его.
+                if (showGpsDisabledErrorScreen) {
+                    // Скрываем только если GPS включен ИЛИ ошибка не "GPS disabled"
+                    if (isGpsActuallyEnabled || !(geoState is Resource.Error && geoState.message?.contains(
+                            "GPS is disabled",
+                            ignoreCase = true
+                        ) == true)
+                    ) {
+                        Log.d(
+                            "WeatherScreen",
+                            "Condition for GPS error no longer met. showGpsDisabledErrorScreen: true -> false."
+                        )
+                        showGpsDisabledErrorScreen = false
+                    }
+                }
+            }
+        }
+    }
+    // --- КОНЕЦ НОВОГО/ОБНОВЛЕННОГО LaunchedEffect ---
+
+
+    DisposableEffect(
+        lifecycleOwner,
+        context
+    ) { // Добавляем context как ключ, если он используется внутри
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_START) {
                 Log.d(
                     "WeatherScreen",
-                    "ON_START. PermRequestedThisSession: $permissionsRequestedThisSession, Current ShowRationale: $showPermissionRationale"
+                    "ON_START. PermRequestedThisSession: $permissionsRequestedThisSession, Current ShowRationale: $showPermissionRationale, ShowGpsError: $showGpsDisabledErrorScreen"
                 )
-                val allGranted = hasLocationPermission(context)
-                if (allGranted) {
+                val permissionsGranted = hasLocationPermission(context)
+                val activity = context as? ComponentActivity
+
+                if (permissionsGranted) {
                     Log.d("WeatherScreen", "Permissions GRANTED on ON_START.")
-                    if (showPermissionRationale) {
+                    val locationManager =
+                        context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                    val isGpsCurrentlyEnabled =
+                        locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+
+                    Log.d("WeatherScreen", "ON_START: GPS Enabled: $isGpsCurrentlyEnabled")
+
+                    if (isGpsCurrentlyEnabled) {
+                        // GPS включен
+                        if (showGpsDisabledErrorScreen) { // Если ранее был показан экран ошибки GPS
+                            Log.d(
+                                "WeatherScreen",
+                                "ON_START: GPS was disabled, now enabled. Refreshing location."
+                            )
+                            showGpsDisabledErrorScreen = false
+                            isLoadingAfterGpsEnabled = true // Показать экран загрузки
+                            viewModel.handlePermissionAndGpsGranted() // Запросить данные
+                        } else if (!pagerItemsList.any { it.id == geoPageId && weatherDataMap[geoPageId] is Resource.Success }) {
+                            // Если экран ошибки GPS не показывался, но данных по геолокации нет (или они не успешны)
+                            // и мы не в процессе загрузки после включения GPS
+                            if (!isLoadingAfterGpsEnabled) {
+                                Log.d(
+                                    "WeatherScreen",
+                                    "ON_START: GPS enabled, no GPS error screen, but geo data might be missing/stale. Triggering refresh."
+                                )
+                                isLoadingAfterGpsEnabled = true // Показать экран загрузки
+                                viewModel.handlePermissionAndGpsGranted()
+                            }
+                        }
+                        // Если разрешения были только что предоставлены из настроек и showPermissionRationale был true
+                        if (showPermissionRationale) {
+                            Log.d(
+                                "WeatherScreen",
+                                "Hiding permission rationale UI as permissions are now granted (and GPS checked)."
+                            )
+                            showPermissionRationale = false
+                        }
+                    } else {
+                        // GPS выключен (а разрешения есть)
                         Log.d(
                             "WeatherScreen",
-                            "Hiding permission rationale UI as permissions are now granted."
+                            "ON_START: Permissions GRANTED, but GPS is DISABLED."
                         )
-                        showPermissionRationale = false
+                        showGpsDisabledErrorScreen = true // Показать экран ошибки GPS
+                        isLoadingAfterGpsEnabled = false
+                        showPermissionRationale = false // Ошибка GPS приоритетнее
+                        viewModel.forceGpsDisabledError() // Сообщить ViewModel, чтобы он выставил соответствующую ошибку
                     }
-                    viewModel.handlePermissionGranted()
                 } else { // Разрешения НЕ предоставлены
                     Log.d("WeatherScreen", "Permissions NOT GRANTED on ON_START.")
-                    val activity = context as? ComponentActivity
-
-                    // Если запрос в этой сессии еще не производился
                     if (!permissionsRequestedThisSession) {
                         Log.d(
                             "WeatherScreen",
@@ -235,13 +404,10 @@ fun WeatherScreen(
                         )
                         locationPermissionLauncher.launch(locationPermissions)
                     } else {
-                        // Запрос в этой сессии уже был (и, видимо, был отклонен, раз allGranted = false)
-                        // Проверяем, можно ли еще запрашивать или отказ перманентный
                         val canStillRequestRationale = locationPermissions.any { perm ->
                             activity?.shouldShowRequestPermissionRationale(perm) ?: false
                         }
                         val isEffectivelyPermanentlyDenied = !canStillRequestRationale
-
                         Log.d(
                             "WeatherScreen",
                             "ON_START: Already requested this session. CanStillRequestRationale: $canStillRequestRationale, IsEffectivelyPermanentlyDenied: $isEffectivelyPermanentlyDenied"
@@ -252,8 +418,10 @@ fun WeatherScreen(
                         } else {
                             viewModel.setPermissionError("Location permission denied. Click to try again.")
                         }
-                        showPermissionRationale =
-                            true // Показываем UI ошибки, если разрешения все еще не даны
+                        showPermissionRationale = true
+                        showGpsDisabledErrorScreen =
+                            false // Ошибка разрешений приоритетнее, если GPS не проверялся
+                        isLoadingAfterGpsEnabled = false
                     }
                 }
             }
@@ -261,8 +429,6 @@ fun WeatherScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-
-
 
     LaunchedEffect(currentPagerIndexFromVM, pagerItemsList.size, pagerState.pageCount) {
         val targetPage = currentPagerIndexFromVM
@@ -446,9 +612,7 @@ fun WeatherScreen(
         }
     }
 
-    val isRefreshing by viewModel.isRefreshing.collectAsState() // Стан для Pull-to-Refresh
-
-    // Стан для PullRefresh
+    val isRefreshing by viewModel.isRefreshing.collectAsState()
     val pullRefreshState = rememberPullRefreshState(
         refreshing = isRefreshing,
         onRefresh = { viewModel.refreshCurrentPageWeather() }
@@ -456,25 +620,17 @@ fun WeatherScreen(
 
     Scaffold(
         topBar = {
+            // ... (логика TopAppBar без изменений, но она будет скрыта, если showGpsDisabledErrorScreen = true или showPermissionRationale = true) ...
             val currentActiveItem by viewModel.currentActivePagerItem.collectAsState()
             val weatherDataMapValue by viewModel.weatherDataStateMap.collectAsState()
-
             val displayTitle = currentActiveItem?.displayName ?: "WeatherML"
             val currentItemId = currentActiveItem?.id
-            val weatherStateForCurrentPage =
-                currentItemId?.let { weatherDataMapValue[it] } // Безпечне отримання
+            val weatherStateForCurrentPage = currentItemId?.let { weatherDataMapValue[it] }
 
-            // TopAppBar показується ТІЛЬКИ ЯКЩО:
-            // 1. НЕ показується UI помилки дозволів (showPermissionRationale == false)
-            // 2. Є активна сторінка пейджера (currentActiveItem != null)
-            // 3. Стан погоди для цієї активної сторінки - Resource.Success
-            val canShowTopBar = !showPermissionRationale &&
+            val canShowTopBar =
+                !showPermissionRationale && !showGpsDisabledErrorScreen && !isLoadingAfterGpsEnabled &&
                     currentActiveItem != null &&
                     weatherStateForCurrentPage is Resource.Success<*>
-            // Додатково можна перевірити, чи геолокація не в стані isLoadingDetails,
-            // якщо ти не хочеш TopAppBar під час завантаження назви міста для геолокації:
-            // && !(currentActiveItem is PagerItem.GeolocationPage && (currentActiveItem as PagerItem.GeolocationPage).isLoadingDetails)
-
 
             if (canShowTopBar) {
                 Surface(
@@ -537,56 +693,34 @@ fun WeatherScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(scaffoldPaddingValues)
-                .pullRefresh(pullRefreshState)
+                .pullRefresh(pullRefreshState) // pullRefreshState должен быть здесь, если контент ниже может его использовать
         ) {
-            // Визначаємо, чи потрібно показувати UI помилки дозволів
-            val geoPageId = PagerItem.GeolocationPage().id
             val permissionErrorMessageFromState =
                 (weatherDataMap[geoPageId] as? Resource.Error)?.message
                     ?: (weatherDataMap["initial_perm_error"] as? Resource.Error)?.message
-                    // Додай сюди ключ, який використовується в viewModel.setPermissionError, якщо він інший
                     ?: (weatherDataMap["permission_denied_key"] as? Resource.Error)?.message
 
-
-            if (showPermissionRationale && permissionErrorMessageFromState?.contains(
-                    "permission",
-                    ignoreCase = true
-                ) == true
-            ) {
-                PermissionErrorUI(
-                    message = permissionErrorMessageFromState, // Это уже String
-                    onGrantPermission = {
-                        permissionsRequestedThisSession =
-                            false // <--- ЗМІНЮЄМО ТУТ, ПЕРЕД ВИКЛИКОМ ЛАУНЧЕРА
-                        locationPermissionLauncher.launch(locationPermissions)
-                    },
-                    onOpenSettings = {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        val uri = Uri.fromParts("package", context.packageName, null)
-                        intent.data = uri
-                        try {
-                            context.startActivity(intent)
-                        } catch (e: Exception) {
-                            Log.e("WeatherScreen", "Could not open app settings", e)
+            // --- ЛОГИКА ОТОБРАЖЕНИЯ КОНТЕНТА ---
+            when {
+                // 1. Экран ошибки GPS (если разрешения есть, но GPS выключен)
+                showGpsDisabledErrorScreen && hasLocationPermission(context) -> {
+                    GpsDisabledErrorUI(
+                        onOpenLocationSettings = {
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                // Флаг showGpsDisabledErrorScreen будет сброшен в ON_START, если GPS включат
+                            } catch (e: Exception) {
+                                Log.e(
+                                    "WeatherScreen",
+                                    "Could not open location settings from GpsDisabledErrorUI",
+                                    e
+                                )
+                            }
                         }
-                        showPermissionRationale = false // Скидаємо після переходу в налаштування
-                    },
-                    // ВОТ КЛЮЧЕВОЙ МОМЕНТ:
-                    isPermanentlyDenied = permissionErrorMessageFromState.contains(
-                        "permanently denied",
-                        ignoreCase = true
                     )
-                )
-            } else if (pagerItemsList.isEmpty()) {
-                // Дозволи є (бо showPermissionRationale = false), але список сторінок порожній
-                // Це означає, що геолокація ще завантажується або сталася інша помилка
-                val loadingOrOtherErrorState = weatherDataMap[geoPageId]
-                    ?: Resource.Loading(message = "Initializing location...")
-
-                if (loadingOrOtherErrorState is Resource.Loading || (loadingOrOtherErrorState is Resource.Error && loadingOrOtherErrorState.message?.contains(
-                        "permission"
-                    ) != true)
-                ) {
+                }
+                // 2. Экран загрузки после включения GPS (или при первоначальной загрузке геолокации)
+                isLoadingAfterGpsEnabled -> { // Главное условие для этого экрана
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -594,48 +728,160 @@ fun WeatherScreen(
                         ) {
                             PixelatedSunLoader()
                             Text(
-                                (loadingOrOtherErrorState as? Resource.Loading)?.message
-                                    ?: "Fetching your location...",
+                                // Сообщение можно брать из geoState, если он Loading, или общее
+                                (weatherDataMap[geoPageId] as? Resource.Loading)?.message
+                                    ?: "Loading your location...",
                                 modifier = Modifier.padding(top = 8.dp),
                                 textAlign = TextAlign.Center
                             )
                         }
                     }
-                } else if (loadingOrOtherErrorState is Resource.Error) { // Інша помилка
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            loadingOrOtherErrorState.message ?: "Failed to load location.",
-                            textAlign = TextAlign.Justify,
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
                 }
-            } else {
-                // Дозволи є, showPermissionRationale = false, і є сторінки для пейджера
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize()
-                ) { pageIndex ->
-                    val pagerItem = pagerItemsList.getOrNull(pageIndex)
-                    if (pagerItem != null) {
-                        val weatherStateForThisPage by remember(pagerItem.id, weatherDataMap) {
-                            derivedStateOf { weatherDataMap[pagerItem.id] ?: Resource.Loading() }
-                        }
-                        WeatherPageContent(
-                            weatherState = weatherStateForThisPage,
-                            temperatureUnit = userPreferences.temperatureUnit, // <--- ЗІБРАНИЙ СТАН
-                            isGeolocationPageAndLoadingDetails = (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails)
+                // 3. Экран ошибки разрешений
+                showPermissionRationale && permissionErrorMessageFromState?.contains(
+                    "permission",
+                    ignoreCase = true
+                ) == true -> {
+                    PermissionErrorUI(
+                        message = permissionErrorMessageFromState,
+                        onGrantPermission = {
+                            permissionsRequestedThisSession = false
+                            locationPermissionLauncher.launch(locationPermissions)
+                        },
+                        onOpenSettings = {
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                            val uri = Uri.fromParts("package", context.packageName, null)
+                            intent.data = uri
+                            try {
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Log.e("WeatherScreen", "Could not open app settings", e)
+                            }
+                            showPermissionRationale = false
+                        },
+                        isPermanentlyDenied = permissionErrorMessageFromState.contains(
+                            "permanently denied",
+                            ignoreCase = true
                         )
-                    } else {
+                    )
+                }
+                // 4. Список страниц пуст (не из-за GPS или разрешений, а, например, другие ошибки или начальная загрузка городов)
+                pagerItemsList.isEmpty() -> {
+                    val currentGeoState = weatherDataMap[geoPageId]
+                    if (currentGeoState is Resource.Loading && hasLocationPermission(context) && !showGpsDisabledErrorScreen && !showPermissionRationale) {
+                        // Это случай начальной загрузки, когда isLoadingAfterGpsEnabled еще не успел стать true,
+                        // но ViewModel уже начал загрузку геолокации.
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
-                        ) { Text("Loading page data...") }
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                PixelatedSunLoader()
+                                Text(
+                                    currentGeoState.message ?: "Fetching your location...",
+                                    modifier = Modifier.padding(top = 8.dp),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    } else if (currentGeoState is Resource.Error && !currentGeoState.message.isNullOrEmpty() &&
+                        !showGpsDisabledErrorScreen && !showPermissionRationale
+                    ) {
+                        // Показываем другую ошибку, если она не связана с GPS/разрешениями
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                currentGeoState.message,
+                                textAlign = TextAlign.Justify,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
+                    } else if (!hasLocationPermission(context) && !showPermissionRationale) {
+                        // Если нет разрешений и не показывается диалог запроса (редкий случай, может быть начальное состояние)
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("Waiting for location permission...", textAlign = TextAlign.Center)
+                        }
+                    } else { // Общий случай для пустого списка без явных ошибок/загрузки
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "No content available.",
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(16.dp)
+                            )
+                        }
                     }
                 }
+                // 5. Отображение пейджера с погодой
+                else -> {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize()
+                    ) { pageIndex ->
+                        val pagerItem = pagerItemsList.getOrNull(pageIndex)
+                        if (pagerItem != null) {
+                            // Сбрасываем isLoadingAfterGpsEnabled, если мы успешно дошли до отображения пейджера
+                            // и текущая страница - геолокация, и она успешно загружена или не является ошибкой GPS
+                            val weatherStateForThisPageReal by remember(
+                                pagerItem.id,
+                                weatherDataMap
+                            ) {
+                                derivedStateOf {
+                                    weatherDataMap[pagerItem.id] ?: Resource.Loading()
+                                }
+                            }
+                            if (pagerItem.id == geoPageId && isLoadingAfterGpsEnabled) {
+                                if (weatherStateForThisPageReal !is Resource.Loading &&
+                                    !(weatherStateForThisPageReal is Resource.Error && weatherStateForThisPageReal.message?.contains(
+                                        "GPS is disabled",
+                                        ignoreCase = true
+                                    ) == true)
+                                ) {
+                                    LaunchedEffect(Unit) { // Используем LaunchedEffect для изменения состояния в композиции
+                                        isLoadingAfterGpsEnabled = false
+                                    }
+                                }
+                            }
 
-                // --- Page Indicator ---
-                // Індикатор Pull-to-Refresh, розміщуємо його зверху по центру
+                            WeatherPageContent(
+                                weatherState = weatherStateForThisPageReal,
+                                temperatureUnit = userPreferences.temperatureUnit,
+                                isGeolocationPageAndLoadingDetails = (pagerItem is PagerItem.GeolocationPage && pagerItem.isLoadingDetails),
+                                pagerItemId = pagerItem.id,
+                                onOpenLocationSettings = { // Передаем колбэк дальше
+                                    try {
+                                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                                    } catch (e: Exception) {
+                                        Log.e(
+                                            "WeatherScreen",
+                                            "Could not open location settings from WeatherPageContent",
+                                            e
+                                        )
+                                    }
+                                }
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) { Text("Loading page data...") }
+                        }
+                    }
+                }
+            }
+
+            // Индикатор Pull-to-Refresh (должен быть видим поверх контента, если он есть)
+            if (!showGpsDisabledErrorScreen && !showPermissionRationale && (pagerItemsList.isNotEmpty() || isLoadingAfterGpsEnabled)) {
                 PullRefreshIndicator(
                     refreshing = isRefreshing,
                     state = pullRefreshState,
@@ -652,7 +898,9 @@ fun WeatherScreen(
 fun WeatherPageContent(
     weatherState: Resource<WeatherDataBundle>,
     temperatureUnit: TemperatureUnit,
-    isGeolocationPageAndLoadingDetails: Boolean = false
+    isGeolocationPageAndLoadingDetails: Boolean = false,
+    pagerItemId: String,
+    onOpenLocationSettings: () -> Unit
 ) {
     if (isGeolocationPageAndLoadingDetails) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -693,14 +941,48 @@ fun WeatherPageContent(
         }
 
         is Resource.Error<*> -> {
-            // Тут не потрібно перевіряти showPermissionRationale, оскільки PermissionErrorUI обробляється окремо
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "Error: ${weatherState.message ?: "Unknown error"}", // ВИПРАВЛЕНО
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Justify, // Змінено на Center
-                    modifier = Modifier.padding(16.dp)
+            val errorMessage = weatherState.message ?: "Unknown error"
+            // Проверяем, является ли это ошибкой отключенного GPS для страницы геолокации
+            if (pagerItemId == PagerItem.GeolocationPage().id && errorMessage.contains(
+                    "GPS is disabled",
+                    ignoreCase = true
                 )
+            ) {
+                // Используем GpsDisabledErrorUI из WeatherScreen, но здесь можно передать специфичные параметры, если нужно
+                // Однако, основная логика отображения GpsDisabledErrorUI теперь в WeatherScreen
+                // Здесь можно показать упрощенное сообщение или специфичный UI для контекста пейджера,
+                // но лучше, если WeatherScreen полностью управляет этим экраном ошибки.
+                // Для согласованности, если WeatherScreen уже показывает GpsDisabledErrorUI, здесь можно ничего не делать или показать заглушку.
+                // Но если мы дошли сюда, значит showGpsDisabledErrorScreen в WeatherScreen = false, что странно.
+                // Логичнее, чтобы GpsDisabledErrorUI отображался на уровне WeatherScreen, покрывая все.
+                // Поэтому, если мы здесь, и это ошибка GPS, то это неожиданно.
+                // Однако, для подстраховки, если WeatherScreen не справился:
+                GpsDisabledErrorUI(onOpenLocationSettings = onOpenLocationSettings)
+            } else {
+                // Обычное отображение ошибки
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            "Error:",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            errorMessage,
+                            textAlign = TextAlign.Justify,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        // Можно добавить кнопку "Повторить" для других типов ошибок
+                        // if (!errorMessage.contains("permission", ignoreCase = true)) {
+                        //     Button(onClick = { /* viewModel.retryLastFetch() */ }) { Text("Retry") }
+                        // }
+                    }
+                }
             }
         }
 
@@ -805,6 +1087,53 @@ fun WeatherPageContent(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun GpsDisabledErrorUI(onOpenLocationSettings: () -> Unit) { // Убираем context, принимаем лямбду
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .background(MaterialTheme.colorScheme.background), // Добавим фон для перекрытия
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_weather_placeholder), // Замените на свою иконку
+            contentDescription = "GPS Disabled Icon",
+            modifier = Modifier.size(108.dp),
+            colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.secondary)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.gps_disabled_title),
+            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = DefaultPixelFontFamily),
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = stringResource(R.string.gps_disabled_message),
+            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = DefaultPixelFontFamily),
+            textAlign = TextAlign.Justify,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = onOpenLocationSettings, // Используем переданный колбэк
+            shape = RoundedCornerShape(4.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+        ) {
+            Text(
+                stringResource(R.string.open_location_settings),
+                fontFamily = DefaultPixelFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 19.sp,
+                color = MaterialTheme.colorScheme.onPrimary
+            )
         }
     }
 }

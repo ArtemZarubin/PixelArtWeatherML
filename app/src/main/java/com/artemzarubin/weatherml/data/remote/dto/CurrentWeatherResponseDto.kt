@@ -63,8 +63,8 @@ data class CloudsDto(
 // DTO for the "coord" object
 @Serializable
 data class CoordinatesDto(
-    @SerialName("lon") val longitude: Double?, // <--- МАЄ БУТИ NULLABLE
-    @SerialName("lat") val latitude: Double?
+    @SerialName("lon") val longitude: Double? = null, // <--- МАЄ БУТИ NULLABLE
+    @SerialName("lat") val latitude: Double? = null
 )
 
 // DTO for the "sys" object in /weather response

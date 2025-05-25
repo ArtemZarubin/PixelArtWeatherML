@@ -1,79 +1,114 @@
 package com.artemzarubin.weatherml.data.location
 
 import android.Manifest
-import android.app.Application // Needs Application context
+import android.app.Application
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationManager // To check if GPS is enabled
+import android.location.LocationManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.artemzarubin.weatherml.domain.location.LocationTracker
+import com.artemzarubin.weatherml.util.Resource
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import kotlinx.coroutines.suspendCancellableCoroutine
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
-import kotlin.coroutines.resume
+import javax.inject.Singleton
 
-// import android.util.Log // For debugging
-
+@Singleton
 class LocationTrackerImpl @Inject constructor(
-    private val application: Application, // Hilt can provide Application context
-    private val fusedLocationClient: FusedLocationProviderClient // Hilt will provide this
+    private val locationClient: FusedLocationProviderClient,
+    @ApplicationContext private val application: Application
 ) : LocationTracker {
 
-    override suspend fun getCurrentLocation(): Location? {
-        // Check if location permissions are granted
-        val hasAccessFineLocationPermission = ContextCompat.checkSelfPermission(
-            application,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+    override fun getCurrentLocation(): Flow<Resource<Location?>> {
+        return callbackFlow {
+            Log.d("LocationTrackerImpl", "getCurrentLocation Flow started")
 
-        val hasAccessCoarseLocationPermission = ContextCompat.checkSelfPermission(
-            application,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        // Check if GPS is enabled
-        val locationManager =
-            application.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
-                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-
-        if (!hasAccessFineLocationPermission && !hasAccessCoarseLocationPermission) {
-            Log.d("LocationTracker", "Location permission not granted.")
-            return null // Permissions not granted
-        }
-
-        if (!isGpsEnabled) {
-            Log.d("LocationTracker", "GPS or Network location is not enabled.")
-            // TODO: Optionally, prompt user to enable location services
-            return null // GPS not enabled
-        }
-
-        // Permissions are granted and GPS is enabled, try to get location
-        // Using suspendCancellableCoroutine to bridge GMS Task API with coroutines
-        return suspendCancellableCoroutine { continuation ->
-            val cancellationTokenSource = CancellationTokenSource()
-            fusedLocationClient.getCurrentLocation(
-                Priority.PRIORITY_HIGH_ACCURACY, // Or PRIORITY_BALANCED_POWER_ACCURACY for coarse
-                cancellationTokenSource.token
-            ).addOnSuccessListener { location: Location? ->
-                // Got last known location. In some rare situations this can be null.
-                // Log.d("LocationTracker", "Location success: $location")
-                continuation.resume(location)
-            }.addOnFailureListener { exception ->
-                Log.e("LocationTracker", "Failed to get location: ${exception.message}")
-                continuation.resume(null) // Resume with null on failure
-            }.addOnCanceledListener {
-                Log.d("LocationTracker", "Location request canceled.")
-                continuation.cancel() // Cancel the coroutine if the task is canceled
+            if (ContextCompat.checkSelfPermission(
+                    application,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(
+                    application,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.w("LocationTrackerImpl", "Location permission not granted.")
+                trySend(Resource.Error("Location permission not granted."))
+                channel.close()
+                return@callbackFlow
             }
 
-            // When the coroutine is cancelled, cancel the GMS Task
-            continuation.invokeOnCancellation {
-                cancellationTokenSource.cancel()
+            val locationManager =
+                application.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val isGpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val isNetworkEnabled =
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+
+            if (!isGpsEnabled && !isNetworkEnabled) {
+                Log.w("LocationTrackerImpl", "GPS and Network providers are disabled.")
+                trySend(Resource.Error("GPS is disabled. Please enable location services."))
+                channel.close()
+                return@callbackFlow
+            }
+
+            trySend(Resource.Loading(message = "Fetching current location..."))
+            Log.d(
+                "LocationTrackerImpl",
+                "Requesting current location update using FusedLocationProviderClient.getCurrentLocation()."
+            )
+
+            val cancellationTokenSource = CancellationTokenSource()
+            // Создаем запрос на текущее местоположение
+            val currentLocationRequest = CurrentLocationRequest.Builder()
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY) // Вы можете выбрать другой приоритет
+                // .setDurationMillis(10000) // Опционально: максимальное время ожидания
+                .build()
+
+            locationClient.getCurrentLocation(currentLocationRequest, cancellationTokenSource.token)
+                .addOnSuccessListener { location: Location? ->
+                    if (location != null) {
+                        Log.i("LocationTrackerImpl", "Successfully got CURRENT location: $location")
+                        trySend(Resource.Success(location))
+                    } else {
+                        // Эта ситуация маловероятна при успешном вызове, но возможна,
+                        // если геолокация отключается в момент запроса.
+                        Log.w(
+                            "LocationTrackerImpl",
+                            "FusedLocationProviderClient.getCurrentLocation() returned null despite success listener."
+                        )
+                        trySend(Resource.Error("Failed to get current location (null result). Try enabling high accuracy GPS."))
+                    }
+                    channel.close()
+                }
+                .addOnFailureListener { exception ->
+                    Log.e(
+                        "LocationTrackerImpl",
+                        "Failed to get current location using FusedLocationProviderClient.getCurrentLocation()",
+                        exception
+                    )
+                    trySend(Resource.Error("Failed to get current location: ${exception.message}"))
+                    channel.close()
+                }
+                .addOnCanceledListener { // Этот слушатель обычно не вызывается, если вы сами не отменяете CancellationToken
+                    Log.w(
+                        "LocationTrackerImpl",
+                        "Current location request was cancelled by FusedLocationProviderClient."
+                    )
+                    trySend(Resource.Error("Location request cancelled."))
+                    channel.close()
+                }
+
+            awaitClose {
+                Log.d("LocationTrackerImpl", "getCurrentLocation Flow closing. Cancelling token.")
+                cancellationTokenSource.cancel() // Важно отменить токен при закрытии Flow
             }
         }
     }
