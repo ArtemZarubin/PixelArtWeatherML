@@ -30,8 +30,8 @@ android {
         applicationId = "com.artemzarubin.weatherml"
         minSdk = 26
         targetSdk = 35 // Match compileSdk
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "OPEN_WEATHER_API_KEY", "\"$openWeatherApiKeyFromProperties\"")
