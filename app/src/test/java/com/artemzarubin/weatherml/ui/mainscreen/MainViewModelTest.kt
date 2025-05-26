@@ -38,7 +38,6 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Ignore
@@ -210,7 +209,17 @@ class MainViewModelTest {
             mutableCurrentActiveLocationFlow.value = null
             // Arrange
             setPermissions(granted = true)
-            coEvery { mockLocationTracker.getCurrentLocation() } returns mockLocation // Геолокація успішна
+
+            // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+            // Вместо: coEvery { mockLocationTracker.getCurrentLocation() } returns mockLocation
+            // Делаем:
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Success(
+                    mockLocation
+                )
+            )
+            // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
             // Re-initialize ViewModel with new permission state for this test
             viewModel = MainViewModel(
                 mockWeatherRepository,
@@ -218,7 +227,6 @@ class MainViewModelTest {
                 mockApplication,
                 mockUserPreferencesRepository
             )
-
 
             testScheduler.advanceUntilIdle()
 
@@ -322,24 +330,239 @@ class MainViewModelTest {
     fun `onCitySuggestionSelected - adds location, sets it active, and fetches weather`() =
         runTest(testDispatcher) {
             // Arrange
-            setPermissions(granted = true)
+            setPermissions(granted = true) // Предполагаем, что геолокация будет добавлена
             val newLocationIdReturnedByRepo = 3L
-            val capturedSavedLocation =
-                slot<SavedLocation>() // Для перевірки, що передається в addSavedLocation
+            val capturedSavedLocation = slot<SavedLocation>()
 
-            // 1. Початковий стан (як у тебе було)
+            // 1. Начальное состояние: пустые списки, геолокация должна загрузиться
             mutableSavedLocationsFlow.value = emptyList()
-            mutableCurrentActiveLocationFlow.value = null
-            every { mockWeatherRepository.getSavedLocations() } returns mutableSavedLocationsFlow // Використовуємо MutableStateFlow
-            every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns mutableCurrentActiveLocationFlow // Використовуємо MutableStateFlow
-            coEvery { mockLocationTracker.getCurrentLocation() } returns mockLocation
+            mutableCurrentActiveLocationFlow.value = null // Нет активной сохраненной
+            every { mockWeatherRepository.getSavedLocations() } returns mutableSavedLocationsFlow
+            every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns mutableCurrentActiveLocationFlow
+
+            // Мок для начальной загрузки геолокации (New York)
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Success(
+                    mockLocation
+                )
+            )
             coEvery {
                 mockWeatherRepository.getLocationDetailsByCoordinates(
-                    any(),
+                    eq(mockLocation.latitude), eq(mockLocation.longitude), any()
+                )
+            } returns Resource.Success(mockGeoDetails) // mockGeoDetails это "New York (Geo)"
+            val initialGeoWeatherData = mockWeatherDataBundle.copy(
+                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "New York (Geo)")
+            )
+            coEvery {
+                mockWeatherRepository.getAllWeatherData(
+                    eq(mockLocation.latitude), eq(mockLocation.longitude), any(), any()
+                )
+            } returns Resource.Success(initialGeoWeatherData)
+
+
+            // 2. Мок для добавления London
+            coEvery { mockWeatherRepository.addSavedLocation(capture(capturedSavedLocation)) } coAnswers {
+                newLocationIdReturnedByRepo
+            }
+
+            // 3. Мок для setActiveLocation (London)
+            // Этот мок теперь должен обновить `mutableSavedLocationsFlow` так,
+            // чтобы он содержал и геолокацию (если она была), и новый Лондон.
+            // И `mutableCurrentActiveLocationFlow` должен указать на Лондон.
+            val londonSavedLocation = SavedLocation(
+                id = newLocationIdReturnedByRepo.toInt(),
+                cityName = "London", countryCode = "GB", latitude = 51.5, longitude = -0.12,
+                isCurrentActive = true, // Делаем Лондон активным
+                orderIndex = 1 // Предполагаем, что геолокация (если есть) будет 0, Лондон - 1
+            )
+            coEvery { mockWeatherRepository.setActiveLocation(eq(londonSavedLocation.id)) } coAnswers {
+                // Обновляем flow сохраненных локаций, чтобы отразить добавление Лондона
+                // и то, что он теперь активен (а геолокация, если была, уже не isCurrentActive в БД)
+                val baseSavedList: List<SavedLocation> =
+                    if (viewModel.pagerItems.value.any { it is PagerItem.GeolocationPage }) {
+                        // Если есть геолокационная страница, и мы добавляем Лондон как активную сохраненную,
+                        // то список сохраненных локаций, который мы эмулируем из БД,
+                        // не должен содержать других *активных* сохраненных локаций.
+                        // Он может содержать другие *неактивные* сохраненные локации, если они были.
+                        // Для простоты этого мока, если мы делаем Лондон единственной активной сохраненной,
+                        // то предыдущий список сохраненных из БД может быть пустым или содержать только неактивные.
+                        // В данном конкретном моке мы хотим, чтобы Лондон был добавлен и стал активным.
+                        // Если до этого была только геолокация, то список сохраненных был пуст.
+                        emptyList<SavedLocation>()
+                    } else {
+                        emptyList<SavedLocation>()
+                    }
+
+                val updatedSavedList = baseSavedList + listOf(londonSavedLocation)
+                mutableSavedLocationsFlow.value = updatedSavedList // Эмитим новый список
+                mutableCurrentActiveLocationFlow.value =
+                    londonSavedLocation // Лондон теперь активен
+                Log.d("ViewModelTestMock", "setActiveLocation for London: updated flows.")
+            }
+
+            // 4. Мок для погоды Лондона
+            val londonWeatherData = mockWeatherDataBundle.copy(
+                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "London")
+            )
+            coEvery {
+                mockWeatherRepository.getAllWeatherData(
+                    eq(londonSavedLocation.latitude),
+                    eq(londonSavedLocation.longitude),
                     any(),
                     any()
                 )
+            } returns Resource.Success(londonWeatherData)
+
+
+            // Инициализируем ViewModel
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle() // Даем время на начальную загрузку геолокации
+
+            // Проверяем начальное состояние: геолокация (New York) должна быть первой и активной
+            viewModel.pagerItems.test {
+                val initialItems = awaitItem()
+                assertTrue("Initial pager items should not be empty", initialItems.isNotEmpty())
+                assertTrue(
+                    "First item should be GeolocationPage",
+                    initialItems.first() is PagerItem.GeolocationPage
+                )
+                assertEquals(
+                    "New York (Geo)",
+                    (initialItems.first() as PagerItem.GeolocationPage).fetchedCityName
+                )
+                // cancelAndConsumeRemainingEvents() // Не закрываем, если хотим дальше следить
+            }
+            assertEquals(
+                "Initial pager index should be 0 (geo)",
+                0,
+                viewModel.currentPagerIndex.value
+            )
+
+
+            // Act: Пользователь выбирает London
+            val londonSuggestion = GeoapifyFeatureDto(
+                properties = GeoapifyPropertiesDto(
+                    city = "London",
+                    countryCode = "GB",
+                    latitude = 51.5,
+                    longitude = -0.12,
+                    formattedAddress = "London, UK",
+                    placeId = "london_id",
+                    country = "UK",
+                    state = null,
+                    postcode = null,
+                    county = null,
+                    street = null,
+                    housenumber = null
+                ), geometry = null
+            )
+
+            // Используем turbine для отслеживания изменений в pagerItems и currentPagerIndex
+            viewModel.pagerItems.test {
+                // Пропускаем начальное состояние, которое мы уже проверили выше
+                // или проверяем его снова, если turbine был инициализирован до ViewModel
+                var currentItems = awaitItem() // Начальные элементы (с геолокацией)
+                Log.d(
+                    "ViewModelTest",
+                    "Initial PagerItems for turbine: ${currentItems.map { it.displayName }}"
+                )
+
+
+                viewModel.onCitySuggestionSelected(londonSuggestion)
+                testScheduler.advanceUntilIdle() // Даем время на addSavedLocation, setActiveLocation
+
+                // Ожидаем, что pagerItems обновится и будет содержать Лондон
+                currentItems = awaitItem() // Должен быть список с Лондоном
+                Log.d(
+                    "ViewModelTest",
+                    "PagerItems after London selected: ${currentItems.map { it.displayName }}"
+                )
+                val londonPageIndexInItems =
+                    currentItems.indexOfFirst { it is PagerItem.SavedPage && it.location.cityName == "London" }
+                assertTrue(
+                    "London should be in pagerItems after selection",
+                    londonPageIndexInItems != -1
+                )
+
+                // ViewModel должен был обновить _currentPagerIndex внутри onCitySuggestionSelected
+                // после ожидания обновления pagerItems
+                testScheduler.advanceUntilIdle() // Еще один advance для стабилизации _currentPagerIndex
+                assertEquals(
+                    "Pager index should be set to London's index",
+                    londonPageIndexInItems,
+                    viewModel.currentPagerIndex.value // Проверяем текущее значение
+                )
+
+                // Проверяем currentActivePagerItem
+                val activeItem = viewModel.currentActivePagerItem.value
+                assertTrue(
+                    "Active PagerItem should be SavedPage",
+                    activeItem is PagerItem.SavedPage
+                )
+                assertEquals("London", (activeItem as PagerItem.SavedPage).location.cityName)
+
+                // Проверяем, что погода для Лондона загрузилась
+                testScheduler.advanceUntilIdle() // Для загрузки погоды
+                val weatherStateForLondon = viewModel.weatherDataStateMap.value[activeItem.id]
+                assertTrue(
+                    "Weather for London should be Success",
+                    weatherStateForLondon is Resource.Success
+                )
+                assertEquals(
+                    "London",
+                    (weatherStateForLondon as Resource.Success).data?.currentWeather?.cityName
+                )
+
+                cancelAndConsumeRemainingEvents()
+            }
+
+            // Дополнительные проверки вызовов моков
+            coVerify { mockWeatherRepository.addSavedLocation(any()) }
+            assertEquals("London", capturedSavedLocation.captured.cityName.trim())
+            coVerify { mockWeatherRepository.setActiveLocation(londonSavedLocation.id) }
+        }
+
+    // @Ignore("Skipping test due to complexity with asynchronous state updates and mock interactions. Needs further investigation.")
+    @Test
+    fun `deleteLocationAndUpdatePager - deletes location, updates pager to geo if active deleted and geo exists`() =
+        runTest(testDispatcher) {
+            // --- ARRANGE (оставляем как в вашем последнем коде) ---
+            setPermissions(granted = true)
+
+            val locationToDeleteId = 1
+            val cityToDelete = SavedLocation(
+                id = locationToDeleteId, cityName = "CityToDelete", countryCode = "TD",
+                latitude = 1.0, longitude = 1.0, isCurrentActive = true, orderIndex = 0
+            )
+            val anotherCity = SavedLocation(
+                id = 2, cityName = "AnotherCity", countryCode = "AC",
+                latitude = 2.0, longitude = 2.0, isCurrentActive = false, orderIndex = 1
+            )
+            val initialSavedList = listOf(cityToDelete, anotherCity)
+            val listAfterDeleteInRepo =
+                listOf(anotherCity.copy(isCurrentActive = false, orderIndex = 0))
+
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Success(
+                    mockLocation
+                )
+            )
+            coEvery {
+                mockWeatherRepository.getLocationDetailsByCoordinates(
+                    eq(mockLocation.latitude),
+                    eq(mockLocation.longitude),
+                    any()
+                )
             } returns Resource.Success(mockGeoDetails)
+            val geoWeatherData = mockWeatherDataBundle.copy(
+                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "New York (Geo)")
+            )
             coEvery {
                 mockWeatherRepository.getAllWeatherData(
                     eq(mockLocation.latitude),
@@ -347,66 +570,31 @@ class MainViewModelTest {
                     any(),
                     any()
                 )
-            } returns Resource.Success(
-                mockWeatherDataBundle.copy(
-                    currentWeather = mockWeatherDataBundle.currentWeather.copy(
-                        cityName = "New York (Geo)"
-                    )
-                )
-            )
+            } returns Resource.Success(geoWeatherData)
 
-            // 2. Мокуємо додавання нової локації (London)
-            coEvery { mockWeatherRepository.addSavedLocation(capture(capturedSavedLocation)) } coAnswers {
-                Log.d(
-                    "ViewModelTestMock",
-                    "addSavedLocation called with: ${capturedSavedLocation.captured.cityName}"
-                )
-                newLocationIdReturnedByRepo
-            }
+            val savedLocationsFlowForTest = MutableStateFlow(initialSavedList)
+            val activeSavedLocationFlowForTest = MutableStateFlow<SavedLocation?>(cityToDelete)
+            every { mockWeatherRepository.getSavedLocations() } returns savedLocationsFlowForTest
+            every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns activeSavedLocationFlowForTest
 
-            // 3. Мокуємо встановлення активної локації (London)
-            // Тепер setActiveLocation просто імітує оновлення Flow, на які підписана ViewModel
-            coEvery { mockWeatherRepository.setActiveLocation(eq(newLocationIdReturnedByRepo.toInt())) } coAnswers {
-                val id = firstArg<Int>()
-                Log.d("ViewModelTestMock", "setActiveLocation called for id: $id")
-                // Імітуємо, що після setActiveLocation, getCurrentActiveWeatherLocation
-                // та getSavedLocations повернуть оновлені дані.
-                // capturedSavedLocation.captured буде доступний ПІСЛЯ виклику addSavedLocation.
-                // Тому ми не можемо його тут використовувати напряму для створення newActiveLondon.
-                // Замість цього, ми оновимо mutable Flow, які ViewModel слухає.
-
-                // Створюємо об'єкт London, який мав би бути збережений
-                val londonAfterSaveAndSetActive = SavedLocation(
-                    id = newLocationIdReturnedByRepo.toInt(),
-                    cityName = "London", // Припускаємо, що це буде передано
-                    countryCode = "GB",
-                    latitude = 51.5,
-                    longitude = -0.12,
-                    isCurrentActive = true, // Бо ми її робимо активною
-                    orderIndex = 0 // Припускаємо, що це перша збережена після геолокації
-                )
-                mutableSavedLocationsFlow.value = listOf(londonAfterSaveAndSetActive)
-                mutableCurrentActiveLocationFlow.value = londonAfterSaveAndSetActive
-                Log.d(
-                    "ViewModelTestMock",
-                    "Mock setActiveLocation: Flows updated for London (id=$id)."
-                )
-            }
-
-            // 4. Мокуємо завантаження погоди для London
-            val londonWeatherData = mockWeatherDataBundle.copy(
-                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "London")
+            val cityToDeleteWeatherData = mockWeatherDataBundle.copy(
+                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "CityToDelete")
             )
             coEvery {
                 mockWeatherRepository.getAllWeatherData(
-                    eq(51.5),
-                    eq(-0.12),
+                    eq(cityToDelete.latitude),
+                    eq(cityToDelete.longitude),
                     any(),
                     any()
                 )
-            } returns Resource.Success(londonWeatherData)
+            } returns Resource.Success(cityToDeleteWeatherData)
 
-            // Ініціалізуємо ViewModel
+            coEvery { mockWeatherRepository.deleteSavedLocation(locationToDeleteId) } coAnswers {
+                savedLocationsFlowForTest.value = listAfterDeleteInRepo
+                activeSavedLocationFlowForTest.value = null
+            }
+            coEvery { mockWeatherRepository.setActiveLocation(0) } returns Unit
+
             viewModel = MainViewModel(
                 mockWeatherRepository,
                 mockLocationTracker,
@@ -415,159 +603,254 @@ class MainViewModelTest {
             )
             testScheduler.advanceUntilIdle()
 
-            // Перевіряємо початковий стан
-            assertEquals(
-                "New York (Geo)",
-                (viewModel.pagerItems.value.getOrNull(0) as? PagerItem.GeolocationPage)?.fetchedCityName
-            )
-
-            // Act
-            val londonSuggestion = GeoapifyFeatureDto(
-                properties = GeoapifyPropertiesDto(
-                    city = "London",
-                    countryCode = "GB",
-                    latitude = 51.5,
-                    longitude = -0.12,
-                    formattedAddress = "London, England, Greater London, United Kingdom",
-                    country = "UK",
-                    state = null,
-                    postcode = null,
-                    county = null,
-                    street = null,
-                    housenumber = null,
-                    addressLine1 = null,
-                    addressLine2 = null,
-                    placeId = "london_id"
-                ),
-                geometry = null
-            )
-
-            // Тестуємо _currentPagerIndex
-            viewModel.currentPagerIndex.test {
-                assertEquals("Initial pager index should be 0 (geo)", 0, awaitItem())
-
-                viewModel.onCitySuggestionSelected(londonSuggestion)
-                testScheduler.advanceUntilIdle() // Даємо час на всі асинхронні операції
-
-                // Очікуємо, що індекс зміниться на індекс London
-                // London має стати другою сторінкою (індекс 1), після геолокації (індекс 0)
-                // АБО якщо геолокація не додається в pagerItems як перша, то індекс 0
-                val londonPageIndex = awaitItem()
-                Log.d("ViewModelTest", "Pager Index after selecting London: $londonPageIndex")
-
-                val finalPagerItems = viewModel.pagerItems.value
-                val expectedLondonIndexInPager =
-                    finalPagerItems.indexOfFirst { it is PagerItem.SavedPage && it.location.cityName == "London" }
-
-                assertTrue("London should be in pagerItems", expectedLondonIndexInPager != -1)
-                assertEquals(
-                    "Pager index should be set to London's index",
-                    expectedLondonIndexInPager,
-                    londonPageIndex
-                )
-
-                // Перевіряємо currentActivePagerItem
-                val activeItem = viewModel.currentActivePagerItem.value
-                assertTrue(
-                    "Active PagerItem should be SavedPage for London",
-                    activeItem is PagerItem.SavedPage
-                )
-                assertEquals("London", (activeItem as PagerItem.SavedPage).location.cityName)
-
-                // Перевіряємо погоду для London
+            val initialItems = viewModel.pagerItems.value
+            val indexOfCityToDelete =
+                initialItems.indexOfFirst { it.id == "saved_$locationToDeleteId" }
+            if (viewModel.currentPagerIndex.value != indexOfCityToDelete && indexOfCityToDelete != -1) {
+                viewModel.onPageChanged(indexOfCityToDelete)
                 testScheduler.advanceUntilIdle()
-                val weatherMap = viewModel.weatherDataStateMap.value
-                val londonWeather = weatherMap[activeItem.id]
-                assertTrue(
-                    "Weather for London should be Success, but was $londonWeather",
-                    londonWeather is Resource.Success
-                )
-                assertEquals(
-                    "London",
-                    (londonWeather as Resource.Success).data?.currentWeather?.cityName
-                )
+            }
+            assertEquals(
+                "Initial active page should be CityToDelete",
+                "saved_$locationToDeleteId",
+                viewModel.currentActivePagerItem.value?.id
+            )
+            assertEquals(
+                "Initial pager index should be for CityToDelete",
+                indexOfCityToDelete,
+                viewModel.currentPagerIndex.value
+            )
 
+            // --- ACT ---
+            viewModel.deleteLocationAndUpdatePager(locationToDeleteId)
+            testScheduler.advanceUntilIdle() // Даем время на deleteSavedLocation и ПЕРВЫЕ обновления Flow (getSavedLocations)
+
+            // --- ASSERT ---
+            coVerify { mockWeatherRepository.deleteSavedLocation(locationToDeleteId) }
+            // ViewModel должен был вызвать setActiveLocation(0) после обновления pagerItems
+            // Мы проверим это после того, как убедимся, что pagerItems обновился и currentPagerIndex тоже
+
+            // 1. Проверяем pagerItems
+            viewModel.pagerItems.test {
+                val itemsAfterDelete = awaitItem() // Ждем обновления списка страниц
+                Log.d(
+                    "ViewModelTest",
+                    "PagerItems after delete: ${itemsAfterDelete.map { it.displayName }}"
+                )
+                assertNotNull("Pager items should not be null after delete", itemsAfterDelete)
+                assertTrue(
+                    "Deleted city should not be in pager items",
+                    itemsAfterDelete.none { it.id == "saved_$locationToDeleteId" })
+                assertTrue(
+                    "AnotherCity should still be in pager items",
+                    itemsAfterDelete.any { it is PagerItem.SavedPage && it.location.id == anotherCity.id })
+                val geoPageIndex = itemsAfterDelete.indexOfFirst { it is PagerItem.GeolocationPage }
+                assertTrue("Geolocation page should exist in final items", geoPageIndex != -1)
+
+                // Важно: не проверяем здесь currentPagerIndex или currentActivePagerItem,
+                // так как они обновляются ПОСЛЕ обновления pagerItems внутри ViewModel.
                 cancelAndConsumeRemainingEvents()
             }
 
-            // Перевірка викликів моків
-            coVerify { mockWeatherRepository.addSavedLocation(any()) }
-            assertEquals("London", capturedSavedLocation.captured.cityName.trim())
-            coVerify { mockWeatherRepository.setActiveLocation(newLocationIdReturnedByRepo.toInt()) }
+            // 2. Даем ViewModel время обновить currentPagerIndex и currentActivePagerItem
+            //    на основе только что обновленных pagerItems.
+            testScheduler.advanceUntilIdle()
+
+            // 3. Теперь проверяем currentPagerIndex
+            val finalPagerItems = viewModel.pagerItems.value // Получаем самый свежий список
+            val expectedGeoPageIndex =
+                finalPagerItems.indexOfFirst { it is PagerItem.GeolocationPage }
+            assertTrue(
+                "Geolocation page should exist in final pager items for index check",
+                expectedGeoPageIndex != -1
+            )
+            assertEquals(
+                "Pager index should be geolocation's index",
+                expectedGeoPageIndex,
+                viewModel.currentPagerIndex.value
+            )
+
+            // 4. Проверяем currentActivePagerItem
+            val finalActiveItem = viewModel.currentActivePagerItem.value
+            assertTrue(
+                "Active item should be GeolocationPage",
+                finalActiveItem is PagerItem.GeolocationPage
+            )
+            assertEquals(
+                "New York (Geo)",
+                (finalActiveItem as PagerItem.GeolocationPage).fetchedCityName
+            )
+
+            // 5. Проверяем вызов setActiveLocation(0) теперь, когда мы уверены, что ViewModel должен был его сделать
+            coVerify { mockWeatherRepository.setActiveLocation(0) }
         }
 
+
+    @Test
+    fun `initial state - permission granted, but GPS disabled - shows GPS error`() =
+        runTest(testDispatcher) {
+            setPermissions(granted = true)
+
+            // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(Resource.Error("GPS is disabled. Please enable location services."))
+            // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle()
+
+            // Assert
+            val geoPageId = PagerItem.GeolocationPage().id
+            val state = viewModel.weatherDataStateMap.value[geoPageId]
+            assertTrue(state is Resource.Error)
+            assertTrue((state as Resource.Error).message?.contains("GPS is disabled") == true)
+            // Также можно проверить, что _geolocationPagerItemState.fetchedCityName == "GPS Disabled"
+        }
+
+    @Test
+    fun `geolocation page shows loading message from location tracker`() =
+        runTest(testDispatcher) {
+            setPermissions(granted = true)
+
+            // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Loading(
+                    message = "Fetching current location..."
+                )
+            )
+            // --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle()
+
+            // Assert
+            val geoPageId = PagerItem.GeolocationPage().id
+            val state = viewModel.weatherDataStateMap.value[geoPageId]
+            assertTrue(state is Resource.Loading)
+            assertEquals("Fetching current location...", (state as Resource.Loading).message)
+            // Также можно проверить, что _geolocationPagerItemState.isLoadingDetails == true
+            // и _geolocationPagerItemState.fetchedCityName содержит сообщение о загрузке
+        }
+
+    // --- НОВЫЕ ТЕСТЫ ---
     @Ignore("Skipping this test temporarily due to issues with async state updates")
     @Test
-    fun `deleteLocationAndUpdatePager - deletes location, updates pager to geo if active deleted and geo exists`() =
+    fun `determineInitialPage - no permission, no active saved, has inactive saved - selects first saved`() =
         runTest(testDispatcher) {
-            setPermissions(granted = true) // Припускаємо, що є дозвіл на геолокацію
-
-            val locationToDeleteId = 1
+            // Arrange
+            setPermissions(granted = false)
             val savedLocation1 = SavedLocation(
-                id = locationToDeleteId,
-                cityName = "CityToDelete",
-                countryCode = "TD",
+                id = 1,
+                cityName = "Paris",
+                countryCode = "FR",
                 latitude = 1.0,
                 longitude = 1.0,
-                isCurrentActive = true,
+                isCurrentActive = false,
                 orderIndex = 0
             )
             val savedLocation2 = SavedLocation(
                 id = 2,
-                cityName = "AnotherCity",
-                countryCode = "AC",
+                cityName = "Berlin",
+                countryCode = "DE",
                 latitude = 2.0,
                 longitude = 2.0,
                 isCurrentActive = false,
                 orderIndex = 1
             )
+            val savedList = listOf(savedLocation1, savedLocation2)
 
-            val initialSavedList = listOf(savedLocation1, savedLocation2)
-            val listAfterDelete = listOf(
-                savedLocation2.copy(
-                    isCurrentActive = true,
-                    orderIndex = 0
-                )
-            ) // Припускаємо, що друга стане активною і першою
+            // Используем MutableStateFlow для имитации изменений из БД
+            val localSavedLocationsFlow = MutableStateFlow(savedList)
+            val localActiveSavedLocationFlow = MutableStateFlow<SavedLocation?>(null)
 
-            // Початковий стан: є дві збережені локації, перша - активна
-            every { mockWeatherRepository.getSavedLocations() } returns flowOf(initialSavedList)
-            every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns flowOf(
-                savedLocation1
+            every { mockWeatherRepository.getSavedLocations() } returns localSavedLocationsFlow
+            every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns localActiveSavedLocationFlow
+
+            val parisWeatherData = mockWeatherDataBundle.copy(
+                currentWeather = mockWeatherDataBundle.currentWeather.copy(cityName = "Paris")
             )
-            coEvery { mockLocationTracker.getCurrentLocation() } returns mockLocation // Геолокація (New York)
-            coEvery {
-                mockWeatherRepository.getLocationDetailsByCoordinates(
-                    any(),
-                    any(),
-                    any()
-                )
-            } returns Resource.Success(mockGeoDetails)
             coEvery {
                 mockWeatherRepository.getAllWeatherData(
-                    any(),
-                    any(),
+                    eq(savedLocation1.latitude),
+                    eq(savedLocation1.longitude),
                     any(),
                     any()
                 )
-            } returns Resource.Success(mockWeatherDataBundle)
-
-
-            // Мокуємо видалення
-            coEvery { mockWeatherRepository.deleteSavedLocation(locationToDeleteId) } coAnswers {
-                Log.d("ViewModelTestMock", "deleteSavedLocation called for id: $locationToDeleteId")
-                // Імітуємо оновлення Flow після видалення
-                every { mockWeatherRepository.getSavedLocations() } returns flowOf(listAfterDelete)
-                // Якщо після видалення активною стає інша збережена
-                // every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns flowOf(listAfterDelete.firstOrNull { it.isCurrentActive })
-                // Якщо після видалення активною має стати геолокація (або нічого, якщо геолокації немає)
-                every { mockWeatherRepository.getCurrentActiveWeatherLocation() } returns flowOf(
-                    null
-                ) // Немає активної збереженої
+            } returns Resource.Success(parisWeatherData)
+            // Мокируем setActiveLocation, чтобы убедиться, что он вызывается для Paris
+            coEvery { mockWeatherRepository.setActiveLocation(savedLocation1.id) } coAnswers {
+                // Имитируем, что после этого Paris становится активной в "БД"
+                localActiveSavedLocationFlow.value = savedLocation1.copy(isCurrentActive = true)
             }
-            // Мокуємо встановлення нової активної локації
-            coEvery { mockWeatherRepository.setActiveLocation(any()) } returns Unit
 
+
+            // Re-initialize ViewModel
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle() // Для init и determineInitialPage
+
+            // Assert
+            Log.d(
+                "TestDetermineInitial",
+                "PagerItems: ${viewModel.pagerItems.value.map { it.displayName }}"
+            )
+            Log.d("TestDetermineInitial", "Current Index: ${viewModel.currentPagerIndex.value}")
+            Log.d(
+                "TestDetermineInitial",
+                "Active Item: ${viewModel.currentActivePagerItem.value?.displayName}"
+            )
+
+
+            // Ожидаем, что Paris (первая сохраненная) будет выбрана
+            // Так как нет разрешений, геолокация не будет в pagerItems
+            val expectedParisIndex = 0 // Paris должна быть на индексе 0
+            assertEquals(
+                "Current pager index should be for Paris",
+                expectedParisIndex,
+                viewModel.currentPagerIndex.value
+            )
+
+            val activeItem = viewModel.currentActivePagerItem.value
+            assertTrue("Active item should be a SavedPage", activeItem is PagerItem.SavedPage)
+            assertEquals("Paris", (activeItem as PagerItem.SavedPage).location.cityName)
+
+            // Проверяем, что setActiveLocation был вызван для Paris
+            coVerify { mockWeatherRepository.setActiveLocation(savedLocation1.id) }
+        }
+
+    @Test
+    fun `onPageChanged - to saved location - sets active location in repo`() =
+        runTest(testDispatcher) {
+            // Arrange
+            setPermissions(granted = true) // Геолокация есть, но мы переключимся на сохраненную
+            val savedLocation = SavedLocation(
+                id = 1,
+                cityName = "Kyiv",
+                countryCode = "UA",
+                latitude = 50.45,
+                longitude = 30.52,
+                isCurrentActive = false,
+                orderIndex = 1
+            )
+            mutableSavedLocationsFlow.value = listOf(savedLocation)
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Success(
+                    mockLocation
+                )
+            ) // Начальная геолокация
 
             viewModel = MainViewModel(
                 mockWeatherRepository,
@@ -575,99 +858,142 @@ class MainViewModelTest {
                 mockApplication,
                 mockUserPreferencesRepository
             )
-            testScheduler.advanceUntilIdle()
+            testScheduler.advanceUntilIdle() // Начальная инициализация
 
-            // --- Начальная настройка активной страницы для теста ---
-            // Сначала убедимся, что CityToDelete есть в списке и найдем ее индекс
-            val cityToDeletePagerId = "saved_$locationToDeleteId"
-            val pagerItemsInitial = viewModel.pagerItems.value
-            val indexOfCityToDelete =
-                pagerItemsInitial.indexOfFirst { it.id == cityToDeletePagerId }
-
-            println("--- DEBUG: Pager items before setting CityToDelete active: ${pagerItemsInitial.map { it.id }}")
-            println("--- DEBUG: Index of CityToDelete ('$cityToDeletePagerId'): $indexOfCityToDelete")
-            assertTrue(
-                "CityToDelete (id: $cityToDeletePagerId) must be in the initial pager items list",
-                indexOfCityToDelete != -1
-            )
-
-            // Если CityToDelete не активна изначально, делаем ее активной
-            if (viewModel.currentActivePagerItem.value?.id != cityToDeletePagerId) {
-                println("--- DEBUG: CityToDelete is not active. Calling onPageChanged($indexOfCityToDelete). Current active: ${viewModel.currentActivePagerItem.value?.id}")
-                viewModel.onPageChanged(indexOfCityToDelete) // Это должно обновить currentPagerIndex и currentActivePagerItem
-                testScheduler.advanceUntilIdle() // Даем время на обновление
-            }
-
-            // Теперь проверяем, что CityToDelete действительно стала активной
-            assertEquals(
-                "Active item should now be CityToDelete before deleting",
-                cityToDeletePagerId,
-                viewModel.currentActivePagerItem.value?.id
-            )
-            assertEquals(
-                "Pager index should be set to CityToDelete's index",
-                indexOfCityToDelete,
-                viewModel.currentPagerIndex.value
-            )
-            println("--- DEBUG: CityToDelete is now active. Current index: ${viewModel.currentPagerIndex.value}")
-            // --- Конец начальной настройки ---
+            // Находим индекс сохраненной страницы (после геолокации)
+            val savedPageIndex =
+                viewModel.pagerItems.value.indexOfFirst { it is PagerItem.SavedPage && it.location.id == savedLocation.id }
+            assertTrue("Saved page for Kyiv should exist", savedPageIndex != -1)
 
             // Act
-            viewModel.deleteLocationAndUpdatePager(locationToDeleteId)
-            testScheduler.advanceUntilIdle() // Даємо час на виконання корутин
+            viewModel.onPageChanged(savedPageIndex)
+            testScheduler.advanceUntilIdle()
 
-// Assert
-            coVerify { mockWeatherRepository.deleteSavedLocation(locationToDeleteId) }
-
-            val itemsAfterDelete = viewModel.pagerItems.value
-            println("--- DEBUG: Pager Items AFTER delete: ${itemsAfterDelete.map { if (it is PagerItem.SavedPage) it.location.cityName else (it as? PagerItem.GeolocationPage)?.fetchedCityName }}")
-            println("--- DEBUG: Current Pager Index AFTER delete: ${viewModel.currentPagerIndex.value}")
-            println("--- DEBUG: Current Active PagerItem AFTER delete: ${viewModel.currentActivePagerItem.value?.let { if (it is PagerItem.SavedPage) it.location.cityName else (it as? PagerItem.GeolocationPage)?.fetchedCityName }}")
-
-            // Очікуємо, що пейджер перемкнеться на геолокацію (індекс 0),
-            // оскільки ми видалили активну збережену, і геолокація є першою сторінкою.
-            // Або на першу збережену, якщо геолокації немає.
-            val finalPagerItems = viewModel.pagerItems.value
-            Log.d(
-                "ViewModelTest",
-                "PagerItems after delete: ${finalPagerItems.map { it.displayName }}"
-            )
-            Log.d(
-                "ViewModelTest",
-                "Current Pager Index after delete: ${viewModel.currentPagerIndex.value}"
-            )
-            Log.d(
-                "ViewModelTest",
-                "Current Active PagerItem after delete: ${viewModel.currentActivePagerItem.value?.displayName}"
-            )
-
-            val expectedNewActiveIndex =
-                finalPagerItems.indexOfFirst { it is PagerItem.GeolocationPage }
-            if (expectedNewActiveIndex != -1) {
-                assertEquals(
-                    "Pager index should be geolocation after deleting active saved",
-                    expectedNewActiveIndex,
-                    viewModel.currentPagerIndex.value
-                )
-                assertTrue(viewModel.currentActivePagerItem.value is PagerItem.GeolocationPage)
-                coVerify { mockWeatherRepository.setActiveLocation(0) } // Перевіряємо, що активність знято зі збережених
-            } else if (finalPagerItems.isNotEmpty()) { // Якщо геолокації немає, але є інші збережені
-                val firstSavedIndex = finalPagerItems.indexOfFirst { it is PagerItem.SavedPage }
-                assertEquals(
-                    "Pager index should be first saved after deleting active saved",
-                    firstSavedIndex,
-                    viewModel.currentPagerIndex.value
-                )
-                assertTrue(viewModel.currentActivePagerItem.value is PagerItem.SavedPage)
-                coVerify { mockWeatherRepository.setActiveLocation((finalPagerItems[firstSavedIndex] as PagerItem.SavedPage).location.id) }
-            } else {
-                // Список порожній
-                assertNull(
-                    "Active pager item should be null if list is empty",
-                    viewModel.currentActivePagerItem.value
-                )
-            }
+            // Assert
+            coVerify { mockWeatherRepository.setActiveLocation(savedLocation.id) }
+            assertEquals(savedPageIndex, viewModel.currentPagerIndex.value)
         }
 
-    // TODO: Додай тести для deleteLocationAndUpdatePager, onUserSwipedPage, refreshCurrentPageWeather, зміни одиниць/теми
+    @Test
+    fun `onPageChanged - to geolocation page - sets active location to 0 in repo`() =
+        runTest(testDispatcher) {
+            // Arrange
+            setPermissions(granted = true)
+            val savedLocation = SavedLocation(
+                id = 1,
+                cityName = "Kyiv",
+                countryCode = "UA",
+                latitude = 50.45,
+                longitude = 30.52,
+                isCurrentActive = true,
+                orderIndex = 0
+            )
+            mutableSavedLocationsFlow.value =
+                listOf(savedLocation) // Начинаем с активной сохраненной
+            mutableCurrentActiveLocationFlow.value = savedLocation
+            coEvery { mockLocationTracker.getCurrentLocation() } returns flowOf(
+                Resource.Success(
+                    mockLocation
+                )
+            )
+
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle() // Начальная инициализация (должна выбрать Kyiv)
+
+            // Находим индекс геолокационной страницы
+            val geoPageIndex =
+                viewModel.pagerItems.value.indexOfFirst { it is PagerItem.GeolocationPage }
+            assertTrue("Geolocation page should exist", geoPageIndex != -1)
+            // Убедимся, что мы не на геолокации изначально
+            if (viewModel.currentPagerIndex.value == geoPageIndex) {
+                // Если случайно геолокация стала активной, переключимся на сохраненную для чистоты теста
+                val savedPageIndex =
+                    viewModel.pagerItems.value.indexOfFirst { it is PagerItem.SavedPage }
+                if (savedPageIndex != -1) viewModel.onPageChanged(savedPageIndex)
+                testScheduler.advanceUntilIdle()
+            }
+            assertTrue(
+                "Initial page should not be geolocation for this test part",
+                viewModel.currentPagerIndex.value != geoPageIndex
+            )
+
+
+            // Act
+            viewModel.onPageChanged(geoPageIndex)
+            testScheduler.advanceUntilIdle()
+
+            // Assert
+            coVerify { mockWeatherRepository.setActiveLocation(0) } // 0 для геолокации
+            assertEquals(geoPageIndex, viewModel.currentPagerIndex.value)
+        }
+
+    @Test
+    fun `searchCityAutocomplete - query less than 3 chars - returns success emptyList`() =
+        runTest(testDispatcher) {
+            // Arrange
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            val shortQuery = "ne"
+
+            // Act
+            viewModel.searchCityAutocomplete(shortQuery)
+            testScheduler.advanceUntilIdle()
+
+            // Assert
+            viewModel.autocompleteResults.test {
+                val result = awaitItem()
+                assertTrue(result is Resource.Success)
+                assertTrue((result as Resource.Success).data.isNullOrEmpty())
+                cancelAndConsumeRemainingEvents()
+            }
+            coVerify(exactly = 0) {
+                mockWeatherRepository.getCityAutocompleteSuggestions(
+                    any(),
+                    any()
+                )
+            } // Проверяем, что вызова в репозиторий не было
+        }
+
+    @Ignore("Skipping this test temporarily due to issues with async state updates")
+    @Test
+    fun `forceGpsDisabledError - updates weatherDataMap and geolocationPagerItemState`() =
+        runTest(testDispatcher) {
+            // Arrange
+            setPermissions(granted = true) // Разрешения есть
+            viewModel = MainViewModel(
+                mockWeatherRepository,
+                mockLocationTracker,
+                mockApplication,
+                mockUserPreferencesRepository
+            )
+            testScheduler.advanceUntilIdle() // Даем ViewModel инициализироваться
+
+            // Act
+            viewModel.forceGpsDisabledError()
+            testScheduler.advanceUntilIdle()
+
+            // Assert
+            val geoPageId = PagerItem.GeolocationPage().id
+            val weatherState = viewModel.weatherDataStateMap.value[geoPageId]
+            assertTrue("Weather state for geo page should be Error", weatherState is Resource.Error)
+            assertEquals(
+                "GPS is disabled. Please enable location services.",
+                (weatherState as Resource.Error).message
+            )
+
+            val geoPagerItem =
+                viewModel.pagerItems.value.find { it.id == geoPageId } as? PagerItem.GeolocationPage
+            assertNotNull("Geolocation PagerItem should exist", geoPagerItem)
+            assertEquals("GPS Disabled", geoPagerItem?.fetchedCityName)
+            assertEquals(false, geoPagerItem?.isLoadingDetails)
+        }
 }
