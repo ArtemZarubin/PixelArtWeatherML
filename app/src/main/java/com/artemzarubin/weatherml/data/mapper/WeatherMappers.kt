@@ -76,7 +76,7 @@ fun mapToWeatherDataBundle(
     val dailyForecastsDomain = mutableListOf<DailyForecast>()
     val groupedByDay = forecastResponseDto.list?.groupBy {
         val date = Date((it.dateTime ?: 0L) * 1000L)
-        SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(date)
+        SimpleDateFormat("yyyyMMdd", Locale.ENGLISH).format(date)
     }
 
     groupedByDay?.values?.take(7)?.forEach { dailyItems -> // Take up to 7 days

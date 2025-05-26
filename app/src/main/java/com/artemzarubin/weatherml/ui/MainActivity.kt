@@ -211,7 +211,7 @@ fun CurrentWeatherMainSection(
         Text(
             text = currentWeather.weatherDescription.replaceFirstChar {
                 if (it.isLowerCase()) it.titlecase(
-                    Locale.getDefault()
+                    Locale.ENGLISH
                 ) else it.toString()
             },
             style = MaterialTheme.typography.bodyLarge
@@ -315,7 +315,7 @@ fun SimpleHourlyForecastItemView(
         Text(
             SimpleDateFormat(
                 "EEE HH:mm",
-                Locale.getDefault()
+                Locale.ENGLISH
             ).format(Date(hourlyForecast.dateTimeMillis)),
             style = MaterialTheme.typography.labelSmall
         )
@@ -364,7 +364,7 @@ fun SimplifiedDailyForecastItemView(
             tomorrowCalendar.get(Calendar.YEAR) == forecastCalendar.get(Calendar.YEAR) &&
                     tomorrowCalendar.get(Calendar.DAY_OF_YEAR) == forecastCalendar.get(Calendar.DAY_OF_YEAR) -> "Tomorrow"
 
-            else -> SimpleDateFormat("EEE, d/MM", Locale.getDefault()).format(forecastDate)
+            else -> SimpleDateFormat("EEE, d/MM", Locale.ENGLISH).format(forecastDate)
         }
     }
 
@@ -435,7 +435,7 @@ fun SimplifiedDailyForecastItemView(
 fun formatUnixTimestampToDateTime(timestampMillis: Long, timezoneOffsetSeconds: Int): String {
     if (timestampMillis == 0L) return "N/A"
     val date = Date(timestampMillis)
-    val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+    val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()) or Locale.ENGLISH
     val customTimeZone = TimeZone.getTimeZone("GMT")
     customTimeZone.rawOffset = timezoneOffsetSeconds * 1000
     sdf.timeZone = customTimeZone
@@ -445,7 +445,7 @@ fun formatUnixTimestampToDateTime(timestampMillis: Long, timezoneOffsetSeconds: 
 fun formatUnixTimestampToTime(timestampMillis: Long, timezoneOffsetSeconds: Int): String {
     if (timestampMillis == 0L) return "N/A"
     val date = Date(timestampMillis)
-    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val sdf = SimpleDateFormat("HH:mm", Locale.ENGLISH)
     val tz = TimeZone.getTimeZone("GMT")
     tz.rawOffset = timezoneOffsetSeconds * 1000
     sdf.timeZone = tz
