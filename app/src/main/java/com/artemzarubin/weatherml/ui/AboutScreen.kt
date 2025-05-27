@@ -209,7 +209,7 @@ fun AboutScreen(
                 animatableYOffset.animateTo(
                     targetValue = targetY,
                     animationSpec = tween(
-                        durationMillis = ((initialY - targetY) / (density.run { 0.4.dp.toPx() }) * 16).toInt(), // Рассчитываем длительность на основе желаемой скорости
+                        durationMillis = ((initialY - targetY) / (density.run { 0.6.dp.toPx() }) * 15).toInt(), // Рассчитываем длительность на основе желаемой скорости
                         // или просто фиксированная длительность: durationMillis = 15000, // например, 15 секунд
                         easing = LinearEasing // Линейное изменение для равномерной прокрутки
                     )
